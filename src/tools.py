@@ -1,6 +1,7 @@
 """セマンティック・レイヤー、SQLクエリ、および Code Interpreter (Python実行)。
 """
 
+import os
 import contextlib
 import json
 import io
@@ -9,7 +10,9 @@ import duckdb
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
-from agents import function_tool, WebSearchTool
+from google import genai
+from google.genai import types
+from agents import function_tool
 from src.preprocess import get_connection, DB_PATH
 
 _CATALOG_PATH = Path(__file__).parent / "context" / "catalog.yaml"
@@ -110,6 +113,33 @@ def execute_python(code: str) -> str:
             ensure_ascii=False,
         )
 
+@function_tool
+def google_web_search(query: str) -> str:
+    """
+    Google検索（Gemini Native Web Search）を使用して、最新のニュースや統計情報を取得する。
+    
+    注意:
+    - 2024年以降の出来事や、データベースに含まれない最新の背景知識を補完するために使用すること。
+    """
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        return "Error: GEMINI_API_KEY is not set."
+
+    client = genai.Client(api_key=api_key, http_options={'api_version': 'v1beta'})
+    model_id = os.getenv("AGENT_MODEL", "gemini-2.5-flash")
+    
+    try:
+        response = client.models.generate_content(
+            model=model_id,
+            contents=query,
+            config=types.GenerateContentConfig(
+                tools=[types.Tool(google_search=types.GoogleSearch())]
+            )
+        )
+        return response.text
+    except Exception as e:
+        return f"Error during Google Search: {str(e)}"
+
 DATA_TOOLS = [
     get_semantic_catalog,
     run_traffic_query,
@@ -119,5 +149,6 @@ DATA_TOOLS = [
 ANALYST_TOOLS = [
     get_domain_knowledge,
     get_background_knowledge,
-    WebSearchTool(),
+    google_web_search,
 ]
+
