@@ -25,7 +25,7 @@ st.set_page_config(
     layout="wide",
 )
 
-st.sidebar.title("分析エンジン設定")
+st.sidebar.title("分析設定")
 model_option = st.sidebar.selectbox(
     "モデル選択",
     ["gemini-2.5-flash", "gemini-1.5-flash", "gpt-4o-mini", "gpt-4o"],
@@ -34,20 +34,18 @@ model_option = st.sidebar.selectbox(
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("""
-### AI Data Analyst (PoC)
-- **SQL Execution**: DuckDB による高速集計
-- **Code Interpreter**: Python による可視化・統計解析
-- **6-Layer Grounding**: OpenAI 内部エージェント流の接地
-  1. テーブルの使用状況 (Usage)
-  2. 人間による注釈 (Annotations)
-  3. Codex エンリッチメント (Code)
-  4. インスティテューショナルナレッジ
-  5. メモリ (Memory)
-  6. ランタイムコンテキスト
+### 接地（Grounding）の構成
+OpenAIのブログで紹介された「6層のコンテキスト」を、シンプルな構成で再現しています。
+1. **使用状況**: 典型的なクエリ例
+2. **注釈**: データカタログ定義
+3. **コード由来**: 前処理ロジックの読解
+4. **組織知**: 専門知識・背景情報の参照
+5. **メモリ**: 過去の修正内容の再利用
+6. **ランタイム**: ライブクエリと自己修正
 """)
 
 st.title("🚗 交通事故統計 AIデータエージェント")
-st.caption("OpenAI 内部データエージェント流（6-Layer Grounded Context）")
+st.caption("OpenAIの「6層の接地」の思想をシンプルに実装した PoC")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
