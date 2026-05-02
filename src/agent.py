@@ -1,25 +1,48 @@
 """マルチエージェント構成（OAI Agents SDK）。
 
 2層構造:
-  DataQueryAgent     — データ層。pandas ツールだけを持つ純粋なデータ実行エージェント。
+  DataQueryAgent       — データ層。pandas ツールだけを持つ純粋なデータ実行エージェント。
   TrafficSafetyAnalyst — 分析層。DataQueryAgent を tool として呼び出し、
                          カタログ(Layer 2)の文脈で結果を解釈・統合する。
 
-モデル切り替えは環境変数 AGENT_MODEL で行う（デフォルト: gpt-4o-mini）。
+対応モデル（AGENT_MODEL 環境変数で切り替え）:
+  OpenAI:  gpt-4o-mini / gpt-4o           → OPENAI_API_KEY
+  Gemini:  gemini-2.5-flash / gemini-2.0-flash → GEMINI_API_KEY
+           ※ Gemini は OpenAI 互換エンドポイント経由で LiteLLM 不要
 """
 
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+from openai import AsyncOpenAI
 from agents import Agent
+from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
 
 from src.tools import ALL_TOOLS
 
+load_dotenv()
+
 _CATALOG_PATH = Path(__file__).parent / "context" / "catalog.yaml"
+
+_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+_GEMINI_PREFIXES = ("gemini-",)
 
 
 def _load_catalog() -> str:
     return _CATALOG_PATH.read_text(encoding="utf-8")
+
+
+def _resolve_model(model_name: str) -> str | OpenAIChatCompletionsModel:
+    """モデル名からエージェントに渡す model オブジェクトを返す。"""
+    if any(model_name.startswith(p) for p in _GEMINI_PREFIXES):
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY が未設定です。.env に GEMINI_API_KEY=AIza... を追加してください。")
+        client = AsyncOpenAI(api_key=api_key, base_url=_GEMINI_BASE_URL)
+        return OpenAIChatCompletionsModel(model=model_name, openai_client=client)
+    # OpenAI（デフォルト）
+    return model_name
 
 
 # ── Layer 1: DataQueryAgent ────────────────────────────────────────────────
@@ -65,17 +88,16 @@ def build_agents(
     (data_agent, analyst_agent) のタプルを返す。
     analyst_agent が data_agent を tool として呼び出すマルチエージェント構成。
     """
-    _model = model or os.getenv("AGENT_MODEL", "gpt-4o-mini")
+    model_name = model or os.getenv("AGENT_MODEL", "gpt-4o-mini")
+    resolved = _resolve_model(model_name)
 
-    # Layer 1: データ実行エージェント
     data_agent = Agent(
         name="DataQueryAgent",
         instructions=_DATA_AGENT_INSTRUCTIONS,
         tools=ALL_TOOLS,
-        model=_model,
+        model=resolved,
     )
 
-    # Layer 2: 分析・統合エージェント（data_agent を tool として利用）
     if with_context:
         catalog = _load_catalog()
         analyst_instructions = _ANALYST_INSTRUCTIONS_WITH_CONTEXT.format(catalog=catalog)
@@ -97,7 +119,7 @@ def build_agents(
                 ),
             )
         ],
-        model=_model,
+        model=resolved,
     )
 
     return data_agent, analyst_agent
