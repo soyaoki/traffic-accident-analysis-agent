@@ -41,6 +41,11 @@ tables:
       速度帯A:
         type: string
         description: 当事者Aの速度規制（低速(<=40), 中速(<=60), 高速(>60)）
+      当事者種別（当事者A）:
+        type: string
+        description: >
+          当事者Aの車両種別（普通乗用車, 軽乗用車, 原付一種, 特定小型原動機付自転車 など）。
+          電動キックボードは「特定小型原動機付自転車」として2024年データに含まれます。
       サポカー名A:
         type: string
         description: 当事者Aのサポカー装備状況（サポカー, 非サポカー, データなし）
@@ -54,3 +59,13 @@ analysis_notes:
     AEBが軽微な事故を未然に防ぐため、統計に残るのはセンサー限界を超えた重大事故のみになる傾向があります。
   projection_2030: >
     2030年目標（1,392名以下）への試算には、2020年と2024年の実績値から年平均減少率を算出し、線形または指数関数的に延長してください。
+
+usage_patterns:
+  description: "[Layer 1: Table Usage Metadata] 頻繁に使用されるクエリパターンと典型的な集計例。"
+  examples:
+    - title: "年度別の事故件数と致死率の推移"
+      sql: "SELECT 年, COUNT(*) as 全件数, SUM(CASE WHEN 死者数 > 0 THEN 1 ELSE 0 END) as 死亡事故件数, (死亡事故件数 * 100.0 / 全件数) as 致死率 FROM accidents GROUP BY 年 ORDER BY 年"
+    - title: "車両種別（電動キックボード等）の事故集計"
+      sql: "SELECT `当事者種別（当事者A）`, COUNT(*) as 件数 FROM accidents WHERE `当事者種別（当事者A）` = '特定小型原動機付自転車' GROUP BY `当事者種別（当事者A）`"
+    - title: "昼夜別の死亡事故の割合"
+      sql: "SELECT 昼夜名, SUM(CASE WHEN 死者数 > 0 THEN 1 ELSE 0 END) as 死亡事故件数 FROM accidents GROUP BY 昼夜名"
