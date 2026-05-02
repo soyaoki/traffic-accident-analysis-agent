@@ -1,29 +1,36 @@
-"""エージェント構成（OAI Agents SDK）。
-SQL (Data Retrieval) + Python (Data Analysis/Visualization) のハイブリッド構成。
+"""マルチエージェント構成（OAI Agents SDK）。
+
+2層構造:
+  DataAgent      — データ実行層。SQL・Python・カタログ参照ツールを持つ純粋な実行エージェント。
+  AnalystAgent   — 解釈・統合層。DataAgent を as_tool で呼び出し、
+                   Layer 2 カタログの文脈で結果を解釈する。
+
+モデル切り替えは環境変数 AGENT_MODEL で行う（デフォルト: gemini-2.5-flash）。
 """
 
 import os
 import asyncio
-from pathlib import Path
 
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from agents import Agent
+from agents.lifecycle import AgentHooksBase
 from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
 
-from src.tools import ALL_TOOLS
-from src.preprocess import init_db
+from src.tools import DATA_TOOLS, ANALYST_TOOLS
+from src.preprocess import init_db, DB_PATH
 
 load_dotenv(override=True)
-init_db()
 
 _GEMINI_BASE_URL_STUDIO = "https://generativelanguage.googleapis.com/v1beta/openai/"
 _GEMINI_PREFIXES = ("gemini-", "google/gemini-")
 
+
 def _resolve_model(model_name: str) -> str | OpenAIChatCompletionsModel:
     if any(model_name.startswith(p) for p in _GEMINI_PREFIXES):
         api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key: raise ValueError("GEMINI_API_KEY が未設定です。")
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY が未設定です。")
         if model_name.startswith("google/"):
             project_id = os.getenv("VERTEX_PROJECT_ID")
             region = os.getenv("VERTEX_REGION", "us-central1")
@@ -34,50 +41,89 @@ def _resolve_model(model_name: str) -> str | OpenAIChatCompletionsModel:
             wait_time = 1.0
         client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         original_create = client.chat.completions.create
+
         async def delayed_create(*args, **kwargs):
-            if wait_time > 0: await asyncio.sleep(wait_time)
+            if wait_time > 0:
+                await asyncio.sleep(wait_time)
             kwargs.pop("parallel_tool_calls", None)
             return await original_create(*args, **kwargs)
+
         client.chat.completions.create = delayed_create
         return OpenAIChatCompletionsModel(model=model_name, openai_client=client)
     return model_name
 
-_SYSTEM_INSTRUCTIONS = """\
-あなたは交通安全領域の高度な専門データサイエンティストです。
-交通事故統計データベース（DuckDB）を使い、SQLとPythonを駆使して分析を行います。
 
-## データ基盤
-- **テーブル名**: 全てのデータは `accidents` という1つのテーブルに格納されています。
-- **データの内容**: 2020年と2024年の交通事故原票データ（約60万件）が含まれています。
-- **メタデータ**: `get_semantic_catalog` でカラム名や計算式を確認できます。
+# ── Layer 1: DataAgent ────────────────────────────────────────────────────
+_DATA_AGENT_INSTRUCTIONS = """\
+あなたは交通事故統計データベースの実行エンジンです。
+上位エージェントの指示に従い、ツールを使ってデータを取得・集計・可視化してください。
 
-## 鉄の掟（データ完全性の遵守）
-1. **捏造の厳禁**: SQLがエラーになったり結果が0件の場合、絶対に「仮のデータ」や「業界平均」を捏造してはいけません。
-2. **ファイルアクセスの禁止**: `READ_CSV` や `open()` でローカルCSVを直接読もうとしないでください。全てのデータは `accidents` テーブルにあります。
-3. **事実に基づく報告**: 取得できたデータのみを使い、不明な点は「不明」と正しく報告してください。
+## 鉄の掟
+1. **捏造の厳禁**: SQLがエラーになったり結果が0件の場合、仮のデータや業界平均を捏造しないこと
+2. **ファイルアクセスの禁止**: `READ_CSV` や `open()` は使わず、必ず `accidents` テーブルを参照すること
+3. **生データを返す**: 解釈・考察は行わず、取得した数値・グラフをそのまま返すこと（解釈は上位エージェントが行う）
 
-## 分析の標準ワークフロー
-1. **カタログ確認**: `get_semantic_catalog` で利用可能なカラムと指標の定義を確認する。
-2. **データ抽出**: `run_traffic_query` で `accidents` テーブルから必要な集計結果を得る。
-3. **高度な分析・可視化**: 抽出したデータを `execute_python` に渡し、グラフ作成や統計解析を行う。
-4. **統合解釈**: 「数値 -> グラフ -> 専門的解釈 -> 限界点」の順で報告する。
-
-## Python実行 (`execute_python`) の極意
-- **データ取得**: `con = duckdb.connect(db_path)` を使い、Python内で直接SQLを投げて DataFrame (`con.execute(sql).df()`) を取得するのが最も安定します。
-- **可視化**: グラフは `plt.savefig('static/plots/ファイル名.png')` で保存し、そのファイル名を回答に含めてください。
-- **日本語**: `japanize_matplotlib` が有効なので、ラベル等に日本語を自由に使ってください。
-- **エラー回避**: 複雑なSQLより、シンプルなSQLでデータを取得し、Pandasで加工する方が成功率が高いです。
+## 標準ワークフロー
+1. `get_semantic_catalog` でカラム定義を確認する
+2. `run_traffic_query` で集計データを取得する
+3. 必要に応じて `execute_python` でグラフ・統計解析を実行する
 """
 
-def build_agents(model: str | None = None) -> tuple[Agent, Agent]:
+# ── Layer 2: AnalystAgent ─────────────────────────────────────────────────
+_ANALYST_INSTRUCTIONS = """\
+あなたは交通安全統計の専門家（アナリストエージェント）です。
+`query_data` でデータを取得し、ドメイン知識と背景知識を統合して、数値の背後にある意味を解説します。
+
+## 知識の使い分け
+- `get_domain_knowledge`: 統計的バイアス、分析方針、交通安全学としての専門知識
+- `get_background_knowledge`: 社会情勢（コロナ等）、法改正、データの収集背景（Off-Data コンテキスト）
+
+## ワークフロー
+1. 知識の確認: `get_domain_knowledge` と `get_background_knowledge` を参照し、分析の前提条件を把握する
+2. データ取得: `query_data` を使って、必要な集計や可視化を実行する
+3. 解釈と統合: 数値の変化が「施策の効果」なのか「外的要因（背景知識）」や「統計上の偏り（ドメイン知識）」なのかを多角的に分析し、回答を組み立てる
+"""
+
+
+def build_agents(
+    model: str | None = None,
+    data_hooks: AgentHooksBase | None = None,
+    analyst_hooks: AgentHooksBase | None = None,
+) -> tuple[Agent, Agent]:
+    """
+    (data_agent, analyst_agent) を返す。
+    analyst_agent が data_agent を as_tool で呼び出すマルチエージェント構成。
+    初回呼び出し時に DuckDB を初期化する。
+    """
+    if not DB_PATH.exists():
+        init_db()
+
     model_name = model or os.getenv("AGENT_MODEL", "gemini-2.5-flash")
     resolved = _resolve_model(model_name)
 
-    analyst = Agent(
-        name="TrafficSafetyAnalyst",
-        instructions=_SYSTEM_INSTRUCTIONS,
-        tools=ALL_TOOLS,
+    data_agent = Agent(
+        name="DataAgent",
+        instructions=_DATA_AGENT_INSTRUCTIONS,
+        tools=DATA_TOOLS,
         model=resolved,
+        hooks=data_hooks,
     )
 
-    return None, analyst
+    analyst_agent = Agent(
+        name="AnalystAgent",
+        instructions=_ANALYST_INSTRUCTIONS,
+        tools=[
+            *ANALYST_TOOLS,
+            data_agent.as_tool(
+                tool_name="query_data",
+                tool_description=(
+                    "交通事故統計データの取得・集計・可視化を実行する。"
+                    "SQL クエリ、Python 統計解析、グラフ生成が可能。"
+                ),
+            ),
+        ],
+        model=resolved,
+        hooks=analyst_hooks,
+    )
+
+    return data_agent, analyst_agent
