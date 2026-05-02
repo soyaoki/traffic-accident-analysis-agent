@@ -3,6 +3,7 @@ import asyncio
 import os
 import json
 import traceback
+from pathlib import Path
 from dotenv import load_dotenv
 
 # 環境変数の読み込み
@@ -16,36 +17,32 @@ if not _has_openai_key:
 
 from agents import Runner
 from src.agent import build_agents
-from agents.stream_events import RunItemStreamEvent
 from agents.items import ToolCallItem, ToolCallOutputItem, MessageOutputItem
 
 st.set_page_config(
-    page_title="交通事故統計分析 AIエージェント",
+    page_title="交通事故統計分析 AIエージェント (OpenAI Style)",
     page_icon="🚗",
     layout="wide"
 )
 
 # サイドバーの設定
-st.sidebar.title("設定")
+st.sidebar.title("分析エンジン設定")
 model_option = st.sidebar.selectbox(
     "モデル選択",
     ["gemini-2.5-flash", "gemini-1.5-flash", "gpt-4o-mini", "gpt-4o"],
     index=0
 )
-with_context = st.sidebar.checkbox("コンテキスト（Layer 2 カタログ）を使用", value=True)
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("""
-### このツールについて
-警察庁の交通事故統計（原票番号単位）を、AIエージェントが多角的に分析します。
-- **DataQueryAgent**: データの集計・抽出を担当
-- **TrafficSafetyAnalyst**: 分析の解釈・統合を担当
+### AI Data Analyst (PoC)
+- **SQL Execution**: DuckDB による高速集計
+- **Code Interpreter**: Python による可視化・統計解析
+- **Semantic Layer**: カタログに基づく正確な意味理解
 """)
 
-st.title("🚗 交通事故統計分析 AIエージェント")
-st.markdown("""
-2020年と2024年の交通事故データを比較・分析し、2030年目標（死者数半減）に向けたインサイトを抽出します。
-""")
+st.title("🚗 交通事故統計 AIデータエージェント")
+st.caption("SQL + Code Interpreter を活用した高度な分析デモ")
 
 # チャット履歴の初期化
 if "messages" not in st.session_state:
@@ -55,89 +52,111 @@ if "messages" not in st.session_state:
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
+        if "plots" in message:
+            for plot_path in message["plots"]:
+                if os.path.exists(plot_path):
+                    st.image(plot_path)
 
 # サンプルクエリの提示
 if not st.session_state.messages:
     st.markdown("### 試してみる質問例")
     cols = st.columns(3)
     sample_queries = [
-        "2020年と2024年の死亡事故件数を比較して変化を教えて",
-        "死亡負担が最も大きく、削減が停滞しているシナリオを特定して",
-        "このままのペースで2030年目標を達成できますか？"
+        "2020年と2024年の死亡事故件数の比較をグラフにして",
+        "人対車両の事故において、速度帯と死亡率の関係を分析して",
+        "このままのペースで2030年目標を達成可能か試算して"
     ]
     for i, query in enumerate(sample_queries):
         if cols[i].button(query):
             st.session_state.prompt = query
 
 # クエリ入力
-prompt = st.chat_input("質問を入力してください（例：サポカーの効果はどうなっていますか？）")
+prompt = st.chat_input("質問を入力してください（例：2020年と2024年の変化をグラフにして）")
 if "prompt" in st.session_state and not prompt:
     prompt = st.session_state.pop("prompt")
 
 if prompt:
-    # ユーザーの入力を表示
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # エージェントの実行
     with st.chat_message("assistant"):
-        status_placeholder = st.status("エージェントが分析を開始しました...", expanded=True)
+        # グラフ表示用の領域を確保（テキストの上に表示）
+        plot_placeholder = st.container()
+        response_placeholder = st.empty()
+        status_placeholder = st.status("エージェントが分析中...", expanded=True)
+        
         try:
-            # nonlocal のスコープエラーを避けるため、ミュータブルなコンテナを使用
-            response_container = {"full_content": ""}
+            response_container = {"full_content": "", "plots": []}
             
-            # 非同期実行
             async def process_stream():
                 # エージェントのビルド
-                _, analyst = build_agents(with_context=with_context, model=model_option)
+                _, analyst = build_agents(model=model_option)
+                
                 streaming_result = Runner.run_streamed(analyst, prompt)
                 async for event in streaming_result.stream_events():
-                    if isinstance(event, RunItemStreamEvent):
+                    # 1. アイテム単位の処理
+                    if event.type == "run_item_stream_event":
                         item = event.item
+                        
+                        # ツール呼び出しの表示
                         if isinstance(item, ToolCallItem):
-                            agent_name = getattr(item.agent, 'name', 'Agent')
                             tool_name = item.tool_name
-                            if tool_name == "query_traffic_data":
-                                # 引数からクエリを抽出して表示
+                            if tool_name == "run_traffic_query":
                                 try:
-                                    args_str = getattr(item.raw_item, 'arguments', '{}')
-                                    args = json.loads(args_str)
-                                    # Agent as tool usually uses 'input' or 'query'
-                                    q = args.get("input") or args.get("query") or "データ集計"
-                                    status_placeholder.write(f"🤖 **{agent_name}** がデータ取得を依頼: `{q}`")
+                                    args = json.loads(item.raw_item.arguments)
+                                    sql = args.get("sql", "")
+                                    status_placeholder.write(f"🔍 **SQL実行:**\n```sql\n{sql}\n```")
                                 except:
-                                    status_placeholder.write(f"🤖 **{agent_name}** がデータ取得を依頼中...")
-                            else:
-                                status_placeholder.write(f"🛠️ **{agent_name}** がツール実行: `{tool_name}`")
+                                    status_placeholder.write("🔍 **SQL実行中...**")
+                            elif tool_name == "execute_python":
+                                status_placeholder.write("🐍 **Python実行中 (Code Interpreter)...**")
+                            elif tool_name == "get_semantic_catalog":
+                                status_placeholder.write("📖 **カタログ定義を確認中...**")
+                        
+                        # ツール結果の表示
                         elif isinstance(item, ToolCallOutputItem):
-                            status_placeholder.write("📊 データの取得・集計が完了しました。")
-                            # ToolCallOutputItem uses 'output'
-                            tool_output = getattr(item, 'output', '')
-                            with status_placeholder.expander("取得データの結果を確認"):
-                                st.code(tool_output, language="json")
-                        elif isinstance(item, MessageOutputItem):
-                            status_placeholder.write("🧠 **TrafficSafetyAnalyst** が回答を生成しました。")
-                
-                # ストリーム終了後に最終出力を取得
-                response_container["full_content"] = streaming_result.final_output
+                            try:
+                                out_data = json.loads(item.output)
+                                if "plots" in out_data:
+                                    for p in out_data["plots"]:
+                                        if p not in response_container["plots"]:
+                                            response_container["plots"].append(p)
+                                            # 専用コンテナに画像を表示
+                                            with plot_placeholder:
+                                                st.image(p, caption=f"Generated Plot: {os.path.basename(p)}")
+                                            status_placeholder.write(f"🖼️ グラフを生成しました: `{os.path.basename(p)}`")
+                                
+                                with status_placeholder.expander(f"ツール実行結果: {getattr(item, 'tool_name', 'Output')}"):
+                                    st.json(out_data)
+                            except:
+                                pass
+
+                    # 2. リアルタイムのテキスト生成（もし利用可能な場合）
+                    elif event.type == "run_item_delta_event":
+                        if hasattr(event, 'delta') and event.delta.type == "text_delta":
+                            response_container["full_content"] += event.delta.text
+                            response_placeholder.markdown(response_container["full_content"] + "▌")
+
+                # 最終的な確定テキストを表示
+                final_output = streaming_result.final_output
+                response_placeholder.markdown(final_output)
+                response_container["full_content"] = final_output
+                return response_container
+
+            res_data = asyncio.run(process_stream())
             
-            asyncio.run(process_stream())
-            full_response = response_container["full_content"]
-            
-            if full_response:
+            if res_data["full_content"]:
                 status_placeholder.update(label="分析完了", state="complete", expanded=False)
-                st.markdown(full_response)
-                st.session_state.messages.append({"role": "assistant", "content": full_response})
+                st.session_state.messages.append({
+                    "role": "assistant", 
+                    "content": res_data["full_content"],
+                    "plots": res_data["plots"]
+                })
             else:
-                status_placeholder.update(label="回答が空でした", state="error", expanded=True)
-                st.warning("エージェントから有効な回答が得られませんでした。プロンプトを調整して再度お試しください。")
+                status_placeholder.update(label="完了しましたが回答がありません", state="complete")
+
         except Exception as e:
             status_placeholder.update(label="エラー発生", state="error", expanded=True)
-            st.error(f"分析中にエラーが発生しました: {e}")
-            with st.expander("詳細なエラーログ"):
-                st.code(traceback.format_exc())
-
-    # レートリミット対策の案内（Gemini無料版などの場合）
-    if "gemini" in model_option:
-        st.info("💡 Gemini無料版をご利用の場合、連続した質問にはレート制限がかかる場合があります。")
+            st.error(f"エラー: {e}")
+            st.code(traceback.format_exc())

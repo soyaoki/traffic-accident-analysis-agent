@@ -1,14 +1,5 @@
-"""マルチエージェント構成（OAI Agents SDK）。
-
-2層構造:
-  DataQueryAgent       — データ層。pandas ツールだけを持つ純粋なデータ実行エージェント。
-  TrafficSafetyAnalyst — 分析層。DataQueryAgent を tool として呼び出し、
-                         カタログ(Layer 2)の文脈で結果を解釈・統合する。
-
-対応モデル（AGENT_MODEL 環境変数で切り替え）:
-  OpenAI:  gpt-4o-mini / gpt-4o           → OPENAI_API_KEY
-  Gemini (AI Studio): gemini-2.5-flash / gemini-1.5-flash → GEMINI_API_KEY
-  Gemini (Vertex AI): google/gemini-1.5-flash             → GEMINI_API_KEY
+"""エージェント構成（OAI Agents SDK）。
+SQL (Data Retrieval) + Python (Data Analysis/Visualization) のハイブリッド構成。
 """
 
 import os
@@ -21,134 +12,72 @@ from agents import Agent
 from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
 
 from src.tools import ALL_TOOLS
+from src.preprocess import init_db
 
-# システム環境変数を優先
 load_dotenv(override=True)
-
-_CATALOG_PATH = Path(__file__).parent / "context" / "catalog.yaml"
+init_db()
 
 _GEMINI_BASE_URL_STUDIO = "https://generativelanguage.googleapis.com/v1beta/openai/"
 _GEMINI_PREFIXES = ("gemini-", "google/gemini-")
 
-
-def _load_catalog() -> str:
-    return _CATALOG_PATH.read_text(encoding="utf-8")
-
-
 def _resolve_model(model_name: str) -> str | OpenAIChatCompletionsModel:
-    """モデル名からエージェントに渡す model オブジェクトを返す。"""
     if any(model_name.startswith(p) for p in _GEMINI_PREFIXES):
         api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            raise ValueError("GEMINI_API_KEY が未設定です。")
-
-        # Vertex AI (google/ プレフィックス) の場合はベースURLを動的に構成
+        if not api_key: raise ValueError("GEMINI_API_KEY が未設定です。")
         if model_name.startswith("google/"):
             project_id = os.getenv("VERTEX_PROJECT_ID")
             region = os.getenv("VERTEX_REGION", "us-central1")
-            if not project_id:
-                raise ValueError("Vertex AI 使用時は VERTEX_PROJECT_ID が必要です。")
-            
-            # Vertex AI OpenAI-compatible endpoint
             base_url = f"https://{region}-aiplatform.googleapis.com/v1/projects/{project_id}/locations/{region}/endpoints/openapi"
-            wait_time = 0.2 # 有料枠なので最小限
+            wait_time = 0.0
         else:
             base_url = _GEMINI_BASE_URL_STUDIO
-            wait_time = 2.0 # 無料枠 (AI Studio) 用のレート制限
-
+            wait_time = 1.0
         client = AsyncOpenAI(api_key=api_key, base_url=base_url)
-
-        # レート制限対策のラッパー
         original_create = client.chat.completions.create
         async def delayed_create(*args, **kwargs):
-            if wait_time > 0:
-                await asyncio.sleep(wait_time)
+            if wait_time > 0: await asyncio.sleep(wait_time)
+            kwargs.pop("parallel_tool_calls", None)
             return await original_create(*args, **kwargs)
         client.chat.completions.create = delayed_create
-
         return OpenAIChatCompletionsModel(model=model_name, openai_client=client)
-
-    # OpenAI（デフォルト）
-    if not os.getenv("OPENAI_API_KEY"):
-        raise ValueError("OPENAI_API_KEY が未設定です。")
     return model_name
 
+_SYSTEM_INSTRUCTIONS = """\
+あなたは交通安全領域の高度な専門データサイエンティストです。
+交通事故統計データベース（DuckDB）を使い、SQLとPythonを駆使して分析を行います。
 
-# ── Layer 1: DataQueryAgent ────────────────────────────────────────────────
-_DATA_AGENT_INSTRUCTIONS = """\
-あなたは交通事故統計データの実行エンジンです。
-渡された指示に従い、提供されたツールを使ってデータを取得・集計してください。
+## データ基盤
+- **テーブル名**: 全てのデータは `accidents` という1つのテーブルに格納されています。
+- **データの内容**: 2020年と2024年の交通事故原票データ（約60万件）が含まれています。
+- **メタデータ**: `get_semantic_catalog` でカラム名や計算式を確認できます。
 
-ルール:
-- 複数のツールが必要な場合はすべて呼び出してから結果をまとめること
-- 数値は加工せずそのまま返すこと（解釈は上位エージェントが行う）
-- ツールが返す JSON をそのまま含めること
+## 鉄の掟（データ完全性の遵守）
+1. **捏造の厳禁**: SQLがエラーになったり結果が0件の場合、絶対に「仮のデータ」や「業界平均」を捏造してはいけません。
+2. **ファイルアクセスの禁止**: `READ_CSV` や `open()` でローカルCSVを直接読もうとしないでください。全てのデータは `accidents` テーブルにあります。
+3. **事実に基づく報告**: 取得できたデータのみを使い、不明な点は「不明」と正しく報告してください。
+
+## 分析の標準ワークフロー
+1. **カタログ確認**: `get_semantic_catalog` で利用可能なカラムと指標の定義を確認する。
+2. **データ抽出**: `run_traffic_query` で `accidents` テーブルから必要な集計結果を得る。
+3. **高度な分析・可視化**: 抽出したデータを `execute_python` に渡し、グラフ作成や統計解析を行う。
+4. **統合解釈**: 「数値 -> グラフ -> 専門的解釈 -> 限界点」の順で報告する。
+
+## Python実行 (`execute_python`) の極意
+- **データ取得**: `con = duckdb.connect(db_path)` を使い、Python内で直接SQLを投げて DataFrame (`con.execute(sql).df()`) を取得するのが最も安定します。
+- **可視化**: グラフは `plt.savefig('static/plots/ファイル名.png')` で保存し、そのファイル名を回答に含めてください。
+- **日本語**: `japanize_matplotlib` が有効なので、ラベル等に日本語を自由に使ってください。
+- **エラー回避**: 複雑なSQLより、シンプルなSQLでデータを取得し、Pandasで加工する方が成功率が高いです。
 """
 
-# ── Layer 2: TrafficSafetyAnalyst ─────────────────────────────────────────
-_ANALYST_INSTRUCTIONS_WITH_CONTEXT = """\
-あなたは交通安全領域のデータサイエンティストです。
-`query_traffic_data` ツールを通じてデータを取得し、以下のカタログと分析方針に基づいて解釈・統合します。
-
-## データカタログ（Layer 2: 人間による注釈）
-
-{catalog}
-
-## 分析の指針
-- 数値は「絶対値」と「変化率」をセットで述べること
-- サポカー分析では必ず「残存事故バイアス」の留保を付けること
-- 2020年データにはサポカー列が存在しない旨を明示すること
-- 横断面データの限界（防いだ事故は観測不能）を明示すること
-- 結果は「数値 → 解釈 → 限界点」の3点構造で提示すること
-"""
-
-_ANALYST_INSTRUCTIONS_NO_CONTEXT = """\
-あなたは交通事故統計データの分析エージェントです。
-`query_traffic_data` ツールを通じてデータを取得し、質問に答えてください。
-結果は日本語で、数値と解釈をセットで提示してください。
-"""
-
-
-def build_agents(
-    with_context: bool = True,
-    model: str | None = None,
-) -> tuple[Agent, Agent]:
-    """
-    (data_agent, analyst_agent) のタプルを返す。
-    analyst_agent が data_agent を tool として呼び出すマルチエージェント構成。
-    """
-    model_name = model or os.getenv("AGENT_MODEL", "gpt-4o-mini")
+def build_agents(model: str | None = None) -> tuple[Agent, Agent]:
+    model_name = model or os.getenv("AGENT_MODEL", "gemini-2.5-flash")
     resolved = _resolve_model(model_name)
 
-    data_agent = Agent(
-        name="DataQueryAgent",
-        instructions=_DATA_AGENT_INSTRUCTIONS,
+    analyst = Agent(
+        name="TrafficSafetyAnalyst",
+        instructions=_SYSTEM_INSTRUCTIONS,
         tools=ALL_TOOLS,
         model=resolved,
     )
 
-    if with_context:
-        catalog = _load_catalog()
-        analyst_instructions = _ANALYST_INSTRUCTIONS_WITH_CONTEXT.format(catalog=catalog)
-        analyst_name = "TrafficSafetyAnalyst_WithContext"
-    else:
-        analyst_instructions = _ANALYST_INSTRUCTIONS_NO_CONTEXT
-        analyst_name = "TrafficSafetyAnalyst_NoContext"
-
-    analyst_agent = Agent(
-        name=analyst_name,
-        instructions=analyst_instructions,
-        tools=[
-            data_agent.as_tool(
-                tool_name="query_traffic_data",
-                tool_description=(
-                    "交通事故統計データの集計・分析を実行する。"
-                    "2020年・2024年の比較、死亡事故セグメント分析、"
-                    "サポカー効果分析、2030年予測などが可能。"
-                ),
-            )
-        ],
-        model=resolved,
-    )
-
-    return data_agent, analyst_agent
+    return None, analyst
