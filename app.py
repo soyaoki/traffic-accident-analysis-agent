@@ -6,7 +6,7 @@ import traceback
 from typing import Any
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
 from agents.tracing import set_tracing_disabled
 _has_openai_key = os.getenv("OPENAI_API_KEY", "").startswith("sk-") and len(os.getenv("OPENAI_API_KEY", "")) > 20
@@ -20,7 +20,7 @@ from agents.tool import Tool
 from src.agent import build_agents
 
 st.set_page_config(
-    page_title="AI Data Agent (OpenAI Style)",
+    page_title="AI Data Agent (OpenAI Philosophy)",
     page_icon="🚗",
     layout="wide",
 )
@@ -89,11 +89,13 @@ if prompt:
             async def on_tool_start(self, context: Any, agent: Any, tool: Tool) -> None:
                 name = tool.name if hasattr(tool, "name") else str(tool)
                 if name == "get_table_usage_metadata":
-                    status.write("📖 **Layer 1: Table Usage (Metadata) を確認中...**")
+                    status.write("📖 **Layer 1: 使用状況 (Metadata) を確認中...**")
                 elif name == "get_codex_enrichment":
-                    status.write("🐍 **Layer 3: Codex Enrichment (前処理コード) を読解中...**")
+                    status.write("📝 **Layer 3: コード由来 (前処理ロジック) を読解中...**")
                 elif name == "get_learned_memory":
-                    status.write("🧠 **Layer 5: Memory (過去の成功例・制約) を検索中...**")
+                    status.write("🧠 **Layer 5: メモリ (過去の知見) を検索中...**")
+                elif name == "save_memory":
+                    status.write("💾 **Layer 5: 今回の知見をメモリに保存中...**")
                 elif name == "run_runtime_context_query":
                     sql = ""
                     if isinstance(context, ToolContext):
@@ -102,11 +104,11 @@ if prompt:
                         except Exception:
                             pass
                     if sql:
-                        status.write(f"🔍 **Layer 6: Runtime Context (ライブクエリ) 実行中:**\n```sql\n{sql}\n```")
+                        status.write(f"🔍 **Layer 6: ランタイム (ライブクエリ) 実行中:**\n```sql\n{sql}\n```")
                     else:
-                        status.write("🔍 **Layer 6: Runtime Context 実行中...**")
+                        status.write("🔍 **Layer 6: ランタイム 実行中...**")
                 elif name == "execute_python":
-                    status.write("📊 **Python 分析実行中 (Code Interpreter)...**")
+                    status.write("📊 **分析実行中 (Python インタープリター)...**")
 
             async def on_tool_end(self, context: Any, agent: Any, tool: Tool, result: str) -> None:
                 name = tool.name if hasattr(tool, "name") else str(tool)
@@ -114,7 +116,7 @@ if prompt:
                     try:
                         rows = json.loads(result)
                         count = len(rows) if isinstance(rows, list) else "?"
-                        status.write(f"✅ **DWH クエリ完了** — {count} 件取得")
+                        status.write(f"✅ **クエリ完了** — {count} 件取得")
                     except Exception:
                         pass
                 elif name == "execute_python":
@@ -134,7 +136,7 @@ if prompt:
             async def on_tool_start(self, context: Any, agent: Any, tool: Tool) -> None:
                 name = tool.name if hasattr(tool, "name") else str(tool)
                 if name == "query_data":
-                    status.write("🤖 **データエージェントに委譲してデータを集計中...**")
+                    status.write("🤖 **データ集計を依頼中...**")
                 elif name == "google_web_search":
                     query = ""
                     if isinstance(context, ToolContext):
@@ -143,16 +145,16 @@ if prompt:
                         except Exception:
                             pass
                     if query:
-                        status.write(f"🌐 **Web Insights (Gemini Native Search) を実行中:**\n> {query}")
+                        status.write(f"🌐 **Web Insights (最新情勢の調査) を実行中:**\n> {query}")
                     else:
                         status.write("🌐 **Web Insights を実行中...**")
                 elif name == "get_institutional_knowledge":
-                    status.write("📖 **Layer 4: Institutional Knowledge (社内知識) を確認中...**")
+                    status.write("📖 **Layer 4: 組織知 (専門知識) を確認中...**")
 
             async def on_tool_end(self, context: Any, agent: Any, tool: Tool, result: str) -> None:
                 name = tool.name if hasattr(tool, "name") else str(tool)
                 if name == "google_web_search":
-                    status.write("✅ **Web Insights 完了** — 最新の社会情勢を取得しました")
+                    status.write("✅ **Web Insights 完了**")
                 elif name == "query_data":
                     import re
                     plot_paths = re.findall(r"!\[.*?\]\((static/plots/.*?\.png)\)", result)
@@ -161,7 +163,7 @@ if prompt:
                             collected_plots.append(p)
                             with plots_container:
                                 st.image(p, caption=os.path.basename(p))
-                            status.write(f"🖼️ **グラフ生成 (DataAgent)**: `{os.path.basename(p)}`")
+                            status.write(f"🖼️ **グラフ生成**: `{os.path.basename(p)}`")
 
         try:
             async def run_agent():
@@ -174,6 +176,7 @@ if prompt:
                     {"role": m["role"], "content": m["content"]}
                     for m in st.session_state.messages
                 ]
+                # 思考の深さに応じてターン数を調整 (SDKデフォルトに依存)
                 return await Runner.run(analyst, history)
 
             result = asyncio.run(run_agent())
