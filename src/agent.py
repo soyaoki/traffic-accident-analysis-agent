@@ -1,11 +1,5 @@
 """マルチエージェント構成（OAI Agents SDK）。
-
-2層構造:
-  DataAgent      — データ実行層。SQL・Python・カタログ参照ツールを持つ純粋な実行エージェント。
-  AnalystAgent   — 解釈・統合層。DataAgent を as_tool で呼び出し、
-                   Layer 2 カタログの文脈で結果を解釈する。
-
-モデル切り替えは環境変数 AGENT_MODEL で行う（デフォルト: gemini-2.5-flash）。
+OpenAI Kepler アーキテクチャに基づき、6層の接地コンテキストを統合します。
 """
 
 import os
@@ -58,16 +52,15 @@ _DATA_AGENT_INSTRUCTIONS = """\
 あなたは交通事故統計データベースの実行エンジン（Keplerアーキテクチャ）です。
 OpenAIの「6層の接地されたコンテキスト」に基づき、正確かつ自律的にデータを処理します。
 
-## 6層の活用指針
-1. **Layer 1 (Usage)**: `get_semantic_catalog` 内の `usage_patterns` を参照し、推奨されるクエリ形式を確認する。
-2. **Layer 3 (Code)**: カラムの変換ルールや由来が不明な場合は `get_data_lineage_code` で前処理ロジックを確認する。
-3. **Layer 5 (Memory)**: 複雑な集計を行う前に `get_learned_memory` を呼び出し、過去の成功例や修正済みのミスを確認する。
-4. **Layer 6 (Runtime)**: `run_traffic_query` でエラーが出た場合、その内容を元に「原因診断 -> SQL修正 -> 再実行」のループを自律的に回す。
+## 6層の活用指針（Kepler Workflow）
+1. **[Layer 1] Table Usage**: `get_table_usage_metadata` を参照し、過去の成功クエリや通常どのテーブルが結合されるかの推論を確認する。
+2. **[Layer 3] Codex Enrichment**: カラムの変換ルール、値の一意性、除外されている粒度レベル（例：テストデータ除外等）を `get_codex_enrichment` で前処理コードから直接読み取って理解する。
+3. **[Layer 5] Memory**: `get_learned_memory` を呼び出し、過去に発見された「わかりにくい修正、フィルタ、制約」を取得して再利用する。
+4. **[Layer 6] Runtime Context**: `run_runtime_context_query` を発行してスキーマを検証し、エラーが出た場合はそのフィードバックを元に自力で修正する。
 
 ## 鉄の掟
-- **成功の記録**: 複雑なクエリに成功したり、エラーを修正して正しい結果を得た場合は、必ず `save_query_learning` でその知見を保存してください。
-- **捏造の厳禁**: SQLが0件の場合、仮のデータを捏造せず、事実のみを報告してください。
-- **生データを返す**: 解釈は上位エージェントが行うため、数値とグラフをそのまま返してください。
+- **記憶の保存**: 新しい修正やフィルタリングの制約を発見した場合は、必ず `save_memory` を実行して将来のベースラインを強化してください。
+- **コード由来の理解**: 見た目が似ているカラムでも、`Codex Enrichment` を通じてその由来（ソースコード上の定義）を区別してください。
 """
 
 # ── Layer 2: AnalystAgent ─────────────────────────────────────────────────
@@ -75,14 +68,15 @@ _ANALYST_INSTRUCTIONS = """\
 あなたは交通安全統計の専門家（アナリストエージェント）です。
 OpenAIの「6層の接地されたコンテキスト」を統合し、データに基づいた高度な洞察を提供します。
 
-## 鉄の掟
-1. **自律的調査**: 不明点があれば `google_web_search` や `get_learned_memory` を即座に実行してください。
-2. **多角的な接地**: DB数値（Layer 1/2）、前処理ロジック（Layer 3）、組織知（Layer 4）、Web情報（Layer 5）を統合して回答を組み立ててください。
+## 接地コンテキストの統合
+- **[Layer 2] Human Annotations**: `get_human_annotations` でスキーマからは推測できない意図やビジネス上のセマンティクスを確認する。
+- **[Layer 4] Institutional Knowledge**: `get_institutional_knowledge` を使用し、Slackやドキュメントに相当する背景（リリース、信頼性インシデント等）をキャプチャする。
+- **[Layer 5] Web Insights**: `google_web_search` を併用し、データベース外の最新の社会動向（法改正ニュース等）をリアルタイムで取得する。
 
 ## ワークフロー
-1. **準備**: `get_learned_memory` で過去の類似分析を確認し、`query_data` で統計データを取得する。
-2. **深掘り**: 数値の背後にある理由を `google_web_search` で調査し、必要に応じて `get_data_lineage_code` でデータの定義（由来）を再確認する。
-3. **統合**: 収集した多層的なコンテキストを融合し、「DBの数値」「Webの最新ニュース」「前処理の定義」「専門知識」を網羅した解説を行う。
+1. **文脈把握**: DataAgentを通じて `Memory` や `Codex Enrichment` を活用した統計結果を取得する。
+2. **理由の解明**: 数値の変化（例：特定時期の減少）が、`Institutional Knowledge` にある障害が原因なのか、あるいは `Web Insights` にある法改正の影響なのかを多角的に分析する。
+3. **統合回答**: 6層すべてのコンテキストを融合し、単なる集計を超えた「意味のある解説」を行う。
 """
 
 
@@ -94,7 +88,6 @@ def build_agents(
     """
     (data_agent, analyst_agent) を返す。
     analyst_agent が data_agent を as_tool で呼び出すマルチエージェント構成。
-    初回呼び出し時に DuckDB を初期化する。
     """
     if not DB_PATH.exists():
         init_db()
@@ -119,7 +112,7 @@ def build_agents(
                 tool_name="query_data",
                 tool_description=(
                     "交通事故統計データの取得・集計・可視化を実行する。"
-                    "SQL クエリ、Python 統計解析、グラフ生成が可能。"
+                    "Kepler 6-Layer Architecture に基づき、コード、記憶、実行時コンテキストを統合する。"
                 ),
             ),
         ],
