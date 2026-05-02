@@ -25,6 +25,13 @@ CHUU_YA = {
 NIGHT_CODES = {21, 22, 23}
 SAPOCA = {0: "対象外", 1: "サポカー", 11: "非サポカー"}  # 11=非サポカー(~91%の死亡事故), 1=サポカー
 INJURY = {0: "対象外", 1: "死亡", 2: "負傷", 4: "損傷なし"}
+TENKOU = {1: "晴", 2: "曇", 3: "雨", 4: "霧", 5: "雪"}
+TIKEI = {1: "市街地-DID", 2: "市街地-その他", 3: "非市街地"}
+ROAD_SHAPE = {
+    1: "交差点", 31: "環状交差点", 7: "交差点付近", 37: "環状交差点付近",
+    11: "トンネル", 12: "橋", 13: "カーブ", 14: "単路-その他",
+    21: "踏切", 22: "踏切", 23: "踏切", 0: "一般交通の場所"
+}
 
 
 def _speed_band(code: int) -> str:
@@ -46,6 +53,9 @@ def load_honhyo(year: int) -> pd.DataFrame:
     df["事故類型名"] = df["事故類型"].map(JIKO_RUIKEI).fillna("不明")
     df["昼夜名"] = df["昼夜"].map(CHUU_YA).fillna("不明")
     df["夜間フラグ"] = df["昼夜"].isin(NIGHT_CODES)
+    df["天候名"] = df["天候"].map(TENKOU).fillna("不明")
+    df["地形名"] = df["地形"].map(TIKEI).fillna("不明")
+    df["道路形状名"] = df["道路形状"].map(ROAD_SHAPE).fillna("不明")
     df["速度帯A"] = df["速度規制（指定のみ）（当事者A）"].apply(_speed_band)
     df["損傷程度A"] = df["人身損傷程度（当事者A）"].map(INJURY).fillna("不明")
     df["損傷程度B"] = df["人身損傷程度（当事者B）"].map(INJURY).fillna("不明")

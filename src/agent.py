@@ -7,11 +7,12 @@
 
 対応モデル（AGENT_MODEL 環境変数で切り替え）:
   OpenAI:  gpt-4o-mini / gpt-4o           → OPENAI_API_KEY
-  Gemini:  gemini-2.5-flash / gemini-2.0-flash → GEMINI_API_KEY
-           ※ Gemini は OpenAI 互換エンドポイント経由で LiteLLM 不要
+  Gemini (AI Studio): gemini-2.5-flash / gemini-1.5-flash → GEMINI_API_KEY
+  Gemini (Vertex AI): google/gemini-1.5-flash             → GEMINI_API_KEY
 """
 
 import os
+import asyncio
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -21,12 +22,13 @@ from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
 
 from src.tools import ALL_TOOLS
 
-load_dotenv()
+# システム環境変数を優先
+load_dotenv(override=True)
 
 _CATALOG_PATH = Path(__file__).parent / "context" / "catalog.yaml"
 
-_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
-_GEMINI_PREFIXES = ("gemini-",)
+_GEMINI_BASE_URL_STUDIO = "https://generativelanguage.googleapis.com/v1beta/openai/"
+_GEMINI_PREFIXES = ("gemini-", "google/gemini-")
 
 
 def _load_catalog() -> str:
@@ -38,10 +40,37 @@ def _resolve_model(model_name: str) -> str | OpenAIChatCompletionsModel:
     if any(model_name.startswith(p) for p in _GEMINI_PREFIXES):
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
-            raise ValueError("GEMINI_API_KEY が未設定です。.env に GEMINI_API_KEY=AIza... を追加してください。")
-        client = AsyncOpenAI(api_key=api_key, base_url=_GEMINI_BASE_URL)
+            raise ValueError("GEMINI_API_KEY が未設定です。")
+
+        # Vertex AI (google/ プレフィックス) の場合はベースURLを動的に構成
+        if model_name.startswith("google/"):
+            project_id = os.getenv("VERTEX_PROJECT_ID")
+            region = os.getenv("VERTEX_REGION", "us-central1")
+            if not project_id:
+                raise ValueError("Vertex AI 使用時は VERTEX_PROJECT_ID が必要です。")
+            
+            # Vertex AI OpenAI-compatible endpoint
+            base_url = f"https://{region}-aiplatform.googleapis.com/v1/projects/{project_id}/locations/{region}/endpoints/openapi"
+            wait_time = 0.2 # 有料枠なので最小限
+        else:
+            base_url = _GEMINI_BASE_URL_STUDIO
+            wait_time = 2.0 # 無料枠 (AI Studio) 用のレート制限
+
+        client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+
+        # レート制限対策のラッパー
+        original_create = client.chat.completions.create
+        async def delayed_create(*args, **kwargs):
+            if wait_time > 0:
+                await asyncio.sleep(wait_time)
+            return await original_create(*args, **kwargs)
+        client.chat.completions.create = delayed_create
+
         return OpenAIChatCompletionsModel(model=model_name, openai_client=client)
+
     # OpenAI（デフォルト）
+    if not os.getenv("OPENAI_API_KEY"):
+        raise ValueError("OPENAI_API_KEY が未設定です。")
     return model_name
 
 

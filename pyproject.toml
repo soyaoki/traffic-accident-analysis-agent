@@ -5,7 +5,9 @@ description = "Add your description here"
 requires-python = ">=3.13"
 dependencies = [
     "anthropic>=0.97.0",
+    "google-genai>=1.74.0",
     "openai>=2.33.0",
     "openai-agents>=0.15.1",
     "pandas>=3.0.2",
+    "streamlit>=1.57.0",
 ]

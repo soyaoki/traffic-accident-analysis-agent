@@ -233,6 +233,121 @@ def analyze_nonsapoca_rate() -> str:
     )
 
 
+@function_tool
+def analyze_environmental_factors() -> str:
+    """
+    天候（雨・雪等）や地形（市街地・非市街地）が致死率や死亡事故件数に与える影響を分析する。
+    「非市街地の方が致死率が高い」等の環境要因を確認するために使う。
+    """
+    df = load_both_years()
+    df["死亡フラグ"] = (df["死者数"] > 0).astype(int)
+
+    env_stats = (
+        df.groupby(["地形名", "天候名"])
+        .agg(
+            全事故件数=("死亡フラグ", "count"),
+            死亡事故件数=("死亡フラグ", "sum"),
+        )
+        .assign(致死率=lambda x: (x["死亡事故件数"] / x["全事故件数"] * 100).round(3))
+        .reset_index()
+    )
+
+    return json.dumps(
+        {
+            "説明": "地形・天候別の事故統計。非市街地や悪天候時のリスクを定量化する。",
+            "environment_stats": env_stats.to_dict(orient="records"),
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+
+@function_tool
+def filter_accidents(year: int, weather: str = None, day_night: str = None) -> str:
+    """
+    指定された条件（年、天候、昼夜）で事故データをフィルタリングし、集計結果を返す。
+    year: 2020 または 2024
+    weather: '晴', '曇', '雨', '霧', '雪' のいずれか（任意）
+    day_night: '昼間' または '夜間'（任意）
+    """
+    df = load_honhyo(year)
+    
+    if weather:
+        df = df[df["天候名"] == weather]
+    
+    if day_night:
+        is_night = (day_night == "夜間")
+        df = df[df["夜間フラグ"] == is_night]
+
+    total = len(df)
+    fatal_accidents = int((df["死者数"] > 0).sum())
+    total_deaths = int(df["死者数"].sum())
+    
+    return json.dumps(
+        {
+            "year": year,
+            "condition": {"weather": weather, "day_night": day_night},
+            "全事故件数": total,
+            "死亡事故件数": fatal_accidents,
+            "死者数合計": total_deaths,
+            "致死率(%)": round(fatal_accidents / total * 100, 3) if total > 0 else 0
+        },
+        ensure_ascii=False,
+        indent=2
+    )
+
+
+@function_tool
+def aggregate_accidents(year: int, groupby: list[str], weather: str = None, day_night: str = None, road_shape: str = None) -> str:
+    """
+    指定された年において、特定のカラムでグループ化して集計を行う（SQLのGROUP BYに相当）。
+    year: 2020 または 2024
+    groupby: グループ化するカラム名のリスト。利用可能なカラム: ['事故類型名', '昼夜名', '天候名', '地形名', '道路形状名', '速度帯A']
+    weather: '晴', '曇', '雨', '霧', '雪' のいずれか（任意フィルタ）
+    day_night: '昼間' または '夜間'（任意フィルタ）
+    road_shape: '交差点', 'トンネル', '橋', 'カーブ', '単路-その他' のいずれか（任意フィルタ）
+    """
+    df = load_honhyo(year)
+    
+    # フィルタリング適用
+    if weather:
+        df = df[df["天候名"] == weather]
+    if day_night:
+        df = df[df["夜間フラグ"] == (day_night == "夜間")]
+    if road_shape:
+        df = df[df["道路形状名"] == road_shape]
+
+    if not groupby:
+        return "Error: groupby column list is empty."
+
+    # 有効なカラムかチェック
+    valid_cols = [c for c in groupby if c in df.columns]
+    if not valid_cols:
+        return f"Error: No valid columns found in {groupby}. Available: {list(df.columns)}"
+
+    agg = (
+        df.groupby(valid_cols)
+        .agg(
+            全事故件数=("死者数", "count"),
+            死亡事故件数=("死者数", lambda x: (x > 0).sum()),
+            死者数合計=("死者数", "sum")
+        )
+        .assign(致死率=lambda x: (x["死亡事故件数"] / x["全事故件数"] * 100).round(3))
+        .reset_index()
+    )
+
+    return json.dumps(
+        {
+            "year": year,
+            "groupby": valid_cols,
+            "filters": {"weather": weather, "day_night": day_night},
+            "results": agg.to_dict(orient="records")
+        },
+        ensure_ascii=False,
+        indent=2
+    )
+
+
 ALL_TOOLS = [
     get_overview,
     compare_years,
@@ -240,4 +355,7 @@ ALL_TOOLS = [
     analyze_sapoca_effect,
     project_2030,
     analyze_nonsapoca_rate,
+    analyze_environmental_factors,
+    filter_accidents,
+    aggregate_accidents,
 ]
