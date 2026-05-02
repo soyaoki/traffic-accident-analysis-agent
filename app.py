@@ -37,9 +37,13 @@ st.sidebar.markdown("""
 ### AI Data Analyst (PoC)
 - **SQL Execution**: DuckDB による高速集計
 - **Code Interpreter**: Python による可視化・統計解析
-- **Semantic Layer**: カタログに基づく正確なデータ定義
-- **Web Insights**: Gemini Native Search による最新情報補完
-- **6-Layer Grounding**: OpenAI 内部エージェントの設計思想を継承
+- **6-Layer Grounding**: OpenAI 内部エージェント流の接地
+  1. テーブルの使用状況 (Usage)
+  2. 人間による注釈 (Annotations)
+  3. Codex エンリッチメント (Code)
+  4. インスティテューショナルナレッジ
+  5. メモリ (Memory)
+  6. ランタイムコンテキスト
 """)
 
 st.title("🚗 交通事故統計 AIデータエージェント")
