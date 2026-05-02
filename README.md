@@ -11,14 +11,15 @@ graph TD
     UI["🌐 Streamlit UI / CLI (run.py)"]
 
     subgraph OAI_Agents["OAI Agents SDK"]
-        Analyst["🧠 AnalystAgent\n(Layer 2: 解釈・統合層)\n- 残存事故バイアス等の留保\n- 数値→解釈→限界点の3点構造"]
+        Analyst["🧠 AnalystAgent\n(Layer 2: 解釈・統合層)\n- 残存事故バイアス等の留保\n- Web検索による背景補完"]
         Data["⚙️ DataAgent\n(Layer 1: 実行層)\n- SQL / Python ツール保持\n- 生データのみ返す"]
     end
 
     subgraph Tools["Tools"]
-        Catalog["📖 get_semantic_catalog\nカタログYAML参照"]
+        Catalog["📖 get_semantic_catalog\nカタログ参照"]
         SQL["🔍 run_traffic_query\nDuckDB SQL実行"]
         Python["🐍 execute_python\nCode Interpreter"]
+        Web["🌐 google_web_search\nGemini Native Search"]
     end
 
     subgraph Storage["Storage"]
@@ -29,6 +30,7 @@ graph TD
     User --> UI
     UI --> Analyst
     Analyst -- "as_tool: query_data" --> Data
+    Analyst --> Web
     Data --> Catalog
     Data --> SQL
     Data --> Python
@@ -38,12 +40,17 @@ graph TD
     Catalog -. "catalog.yaml" .-> Analyst
 ```
 
-## 2層構造の設計意図
+## 5層のコンテキスト構造
 
-| 層 | エージェント | 役割 |
+本プロジェクトは、単なるDB集計を超えた「意味のある分析」を行うため、以下の5つのレイヤーでエージェントを構成しています。
+
+| 層 | コンテキスト | 役割 |
 |---|---|---|
-| Layer 1 | DataAgent | SQL実行・Python実行・カタログ参照。生データのみ返し、解釈しない |
-| Layer 2 | AnalystAgent | 残存事故バイアス・横断面データ限界などの文脈でデータを解釈 |
+| Layer 1 | **Database (Facts)** | DataAgent が DuckDB から取得する数値事実。 |
+| Layer 2 | **Semantic Layer** | カタログによるカラムの意味定義（`catalog.yaml`）。 |
+| Layer 3 | **Domain Knowledge** | 交通事故分析特有のバイアスや分析方針（`domain.yaml`）。 |
+| Layer 4 | **Background Info** | 過去の法改正や社会情勢の固定データ（`background.yaml`）。 |
+| Layer 5 | **Web Insights** | **(NEW)** Gemini Native Search による最新の法改正・ニュースのリアルタイム補完。 |
 
 AnalystAgent は DataAgent を `as_tool` で呼び出す。LLM同士が連携するマルチエージェント構成により、実行ロジックとドメイン知識を分離している。
 

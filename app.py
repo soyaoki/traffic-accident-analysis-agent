@@ -123,7 +123,27 @@ if prompt:
 
         class AnalystAgentHooks(AgentHooksBase):
             async def on_tool_start(self, context: Any, agent: Any, tool: Tool) -> None:
-                status.write("🤖 **DataAgent に委譲して分析を実行中...**")
+                name = tool.name if hasattr(tool, "name") else str(tool)
+                if name == "query_data":
+                    status.write("🤖 **DataAgent に委譲してデータを集計中...**")
+                elif name == "google_web_search":
+                    query = ""
+                    if isinstance(context, ToolContext):
+                        try:
+                            query = json.loads(context.tool_arguments).get("query", "")
+                        except Exception:
+                            pass
+                    if query:
+                        status.write(f"🌐 **Web 検索を実行中 (Gemini Native):**\n> {query}")
+                    else:
+                        status.write("🌐 **Web 検索を実行中...**")
+                elif name in ["get_domain_knowledge", "get_background_knowledge"]:
+                    status.write(f"📖 **専門知識を確認中 (`{name}`)...**")
+
+            async def on_tool_end(self, context: Any, agent: Any, tool: Tool, result: str) -> None:
+                name = tool.name if hasattr(tool, "name") else str(tool)
+                if name == "google_web_search":
+                    status.write("✅ **Web 検索完了** — 背景情報を取得しました")
 
         try:
             async def run_agent():
