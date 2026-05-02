@@ -1,0 +1,11 @@
+[project]
+name = "ai-data-analytics-agents"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.13"
+dependencies = [
+    "anthropic>=0.97.0",
+    "openai>=2.33.0",
+    "openai-agents>=0.15.1",
+    "pandas>=3.0.2",
+]
