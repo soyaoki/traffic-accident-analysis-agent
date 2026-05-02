@@ -1,5 +1,5 @@
 """セマンティック・レイヤー、SQLクエリ、および Code Interpreter (Python実行)。
-OpenAI Kepler アーキテクチャに準拠した6層の接地コンテキストを提供します。
+OpenAI が公開した「6層の接地されたコンテキスト (6 layers of grounded context)」に基づき構築。
 """
 
 import os
@@ -25,32 +25,30 @@ _PLOT_DIR.mkdir(parents=True, exist_ok=True)
 
 @function_tool
 def get_table_usage_metadata() -> str:
-    """[Layer 1: Table Usage] テーブルの利用実態と系統（Lineage）情報を取得する。
-    過去の成功したクエリパターンや、通常どのテーブルがどう結合されるかの推論に使用する。"""
+    """[レイヤー #1：テーブルの使用状況] スキーマメタデータ（列名とデータ型）およびテーブル系統（Lineage）を取得する。
+    過去のクエリを取り込むことで、クエリの記述方法や、通常どのテーブルが結合されるかの理解に使用する。"""
     if not _CATALOG_PATH.exists():
         return "Error: Catalog file not found."
     return _CATALOG_PATH.read_text(encoding="utf-8")
 
 @function_tool
 def get_human_annotations() -> str:
-    """[Layer 2: Human Annotations] ドメインエキスパートによる厳選された説明を取得する。
-    スキーマからは推測できない意図、セマンティクス、ビジネス上の意味、既知の注意事項を確認するために使用する。"""
-    # 現在は catalog.yaml に集約
+    """[レイヤー #2：人間による注釈] ドメインの専門家によって提供される厳選された説明を取得する。
+    スキーマからは簡単に推測できない意図、セマンティクス、ビジネス上の意味、既知の注意事項を確認するために使用する。"""
     return get_table_usage_metadata()
 
 @function_tool
 def get_codex_enrichment() -> str:
-    """[Layer 3: Codex Enrichment] テーブルのコードレベルの定義を導き出す。
-    preprocess.py を読み取り、値の一意性、データの更新頻度、除外されている粒度レベル（例：テストデータ除外等）などの
-    微妙な差異をコードから抽出して理解するために使用する。"""
+    """[レイヤー #3：Codex エンリッチメント] テーブルのコードレベルの定義を導き出す。
+    ソースコードから値の一意性、データの更新頻度、データの範囲（除外されている粒度レベルなど）を理解するために使用する。"""
     if not _PREPROCESS_PATH.exists():
         return "Error: Source code not found."
     return _PREPROCESS_PATH.read_text(encoding="utf-8")
 
 @function_tool
 def get_institutional_knowledge() -> str:
-    """[Layer 4: Institutional Knowledge] 組織内の知識（ドキュメント、リリース情報、インシデント等）を検索する。
-    数値の変化が「バグ」なのか「施策」なのか「社会情勢」なのかを判断するための会社コンテキストを取得する。"""
+    """[レイヤー #4：インスティテューショナルナレッジ] 社内のドキュメント（Slack、Notion等）に相当するコンテキストを取得する。
+    リリース、信頼性インシデント、主要メトリックの標準定義と計算ロジックなどの重要な会社のコンテキストを確認するために使用する。"""
     knowledge = ""
     if _DOMAIN_PATH.exists():
         knowledge += "--- Domain Knowledge ---\n" + _DOMAIN_PATH.read_text(encoding="utf-8") + "\n"
@@ -60,8 +58,8 @@ def get_institutional_knowledge() -> str:
 
 @function_tool
 def get_learned_memory() -> str:
-    """[Layer 5: Memory] 過去に発見された微妙な差異、修正、フィルタリングの制約（例：特定の実験ゲートの文字列等）を取得する。
-    他のレイヤーからは推測が難しい「わかりにくい修正」を再利用して、正確な回答のベースラインを確保するために使用する。"""
+    """[レイヤー #5：メモリ] 過去の修正、フィルタ、制約など、他のレイヤーから推測が難しい「わかりにくい修正」を取得する。
+    同じ問題でつまずかないよう、学習内容を次回の回答の正確なベースラインとして再利用するために使用する。"""
     con = get_connection()
     try:
         con.execute("""
@@ -84,15 +82,15 @@ def get_learned_memory() -> str:
 
 @function_tool
 def save_memory(topic: str, sql: str, note: str) -> str:
-    """[Layer 5: Memory] 継続的な改善のため、今回の学習内容（フィルタ、制約、修正の微妙な差異）を保存する。
-    複雑なフィルタリングを正しく行えた際に、次回同じ問題でつまずかないように必ず実行すること。"""
+    """[レイヤー #5：メモリ] 特定のデータに関する修正や学習内容を次回のために保存する。
+    ユーザーによる修正や、他のレイヤーからは推論しづらい制約を発見した際に必ず実行すること。"""
     con = get_connection()
     try:
         con.execute(
             "INSERT INTO query_learnings (topic, successful_sql, learning_note) VALUES (?, ?, ?)",
             [topic, sql, note]
         )
-        return "Memory saved. This is now part of the global baseline for future responses."
+        return "Memory saved. Future responses will be based on this more accurate baseline."
     except Exception as e:
         return f"Error: {str(e)}"
     finally:
@@ -100,8 +98,8 @@ def save_memory(topic: str, sql: str, note: str) -> str:
 
 @function_tool
 def run_runtime_context_query(sql: str) -> str:
-    """[Layer 6: Runtime Context] データウェアハウスにライブクエリを発行し、テーブルを直接調べたり検証したりする。
-    事前コンテキストがない場合や古い場合に、スキーマを検証し、リアルタイムでデータを理解するために使用する。"""
+    """[レイヤー #6：ランタイムコンテキスト] データウェアハウスにライブクエリを発行して、テーブルを直接調べたりクエリしたりする。
+    スキーマを検証し、データをリアルタイムで理解するために使用する。"""
     con = get_connection()
     try:
         df = con.execute(sql).df()
@@ -109,15 +107,14 @@ def run_runtime_context_query(sql: str) -> str:
             return df.head(100).to_json(orient="records", force_ascii=False)
         return df.to_json(orient="records", force_ascii=False)
     except Exception as e:
-        # Runtime Feedback
         tables = con.execute("SHOW TABLES").df()
-        return f"Runtime feedback: {str(e)}\nAvailable tables: {tables['name'].tolist()}"
+        return f"Runtime error: {str(e)}\nAvailable tables: {tables['name'].tolist()}"
     finally:
         con.close()
 
 @function_tool
 def execute_python(code: str) -> str:
-    """Pythonによる可視化・統計解析を実行する。"""
+    """Pythonによる分析・可視化を実行する。"""
     import japanize_matplotlib  # noqa: F401
     plt.switch_backend("Agg")
     loc = {"pd": pd, "plt": plt, "sns": sns, "db_path": str(DB_PATH), "duckdb": duckdb}
@@ -133,7 +130,7 @@ def execute_python(code: str) -> str:
 
 @function_tool
 def google_web_search(query: str) -> str:
-    """Gemini Native Search による最新情報（2024年以降の法改正等）の取得。"""
+    """最新情報（法改正等）の取得。"""
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key: return "Error: API key missing."
     client = genai.Client(api_key=api_key, http_options={'api_version': 'v1beta'})

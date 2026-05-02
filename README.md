@@ -40,17 +40,18 @@ graph TD
     Catalog -. "catalog.yaml" .-> Analyst
 ```
 
-## 5層のコンテキスト構造
+## 6層の接地（Grounded Context）構造
 
-本プロジェクトは、単なるDB集計を超えた「意味のある分析」を行うため、以下の5つのレイヤーでエージェントを構成しています。
+本プロジェクトは、Dash (Agno) 等の先進的なエージェント設計思想に基づき、以下の6つのレイヤーでエージェントの回答を「接地（Grounding）」させています。これにより、ハルシネーションを最小化し、専門的な洞察を提供します。
 
 | 層 | コンテキスト | 役割 |
 |---|---|---|
-| Layer 1 | **Database (Facts)** | DataAgent が DuckDB から取得する数値事実。 |
-| Layer 2 | **Semantic Layer** | カタログによるカラムの意味定義（`catalog.yaml`）。 |
-| Layer 3 | **Domain Knowledge** | 交通事故分析特有のバイアスや分析方針（`domain.yaml`）。 |
-| Layer 4 | **Background Info** | 過去の法改正や社会情勢の固定データ（`background.yaml`）。 |
-| Layer 5 | **Web Insights** | **(NEW)** Gemini Native Search による最新の法改正・ニュースのリアルタイム補完。 |
+| Layer 1 | **Schema** | DuckDB のテーブル構造と生データ。 |
+| Layer 2 | **Semantic Layer** | カタログによるカラムの意味・指標定義（`catalog.yaml`）。 |
+| Layer 3 | **Domain Knowledge** | 交通事故分析の専門知識（バイアス、分析方針等）（`domain.yaml`）。 |
+| Layer 4 | **Institutional Knowledge** | 過去の法改正や社会情勢の固定コンテキスト（`background.yaml`）。 |
+| Layer 5 | **Web Insights** | Gemini Native Search による最新の法改正・ニュースのリアルタイム補完。 |
+| Layer 6 | **Learnings & Patterns** | 会話履歴の維持による文脈理解と、蓄積された分析パターン。 |
 
 AnalystAgent は DataAgent を `as_tool` で呼び出す。LLM同士が連携するマルチエージェント構成により、実行ロジックとドメイン知識を分離している。
 
