@@ -20,7 +20,7 @@ from agents.tool import Tool
 from src.agent import build_agents
 
 st.set_page_config(
-    page_title="Kepler AI Data Agent",
+    page_title="AI Data Agent (OpenAI Style)",
     page_icon="🚗",
     layout="wide",
 )
@@ -39,11 +39,11 @@ st.sidebar.markdown("""
 - **Code Interpreter**: Python による可視化・統計解析
 - **Semantic Layer**: カタログに基づく正確なデータ定義
 - **Web Insights**: Gemini Native Search による最新情報補完
-- **6-Layer Architecture**: システム工学に基づく高度な接地（Grounding）
+- **6-Layer Grounding**: OpenAI 内部エージェントの設計思想を継承
 """)
 
 st.title("🚗 交通事故統計 AIデータエージェント")
-st.caption("OpenAI Kepler アーキテクチャ準拠（6-Layer Grounded Context）")
+st.caption("OpenAI 内部データエージェント流（6-Layer Grounded Context）")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -132,7 +132,7 @@ if prompt:
             async def on_tool_start(self, context: Any, agent: Any, tool: Tool) -> None:
                 name = tool.name if hasattr(tool, "name") else str(tool)
                 if name == "query_data":
-                    status.write("🤖 **Kepler Data Agent に委譲してデータを集計中...**")
+                    status.write("🤖 **データエージェントに委譲してデータを集計中...**")
                 elif name == "google_web_search":
                     query = ""
                     if isinstance(context, ToolContext):
