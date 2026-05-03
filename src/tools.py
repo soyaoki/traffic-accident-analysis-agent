@@ -10,6 +10,7 @@ import pandas as pd
 import duckdb
 import matplotlib.pyplot as plt
 import seaborn as sns
+import japanize_matplotlib  # 日本語文字化け対策
 from pathlib import Path
 from google import genai
 from google.genai import types
@@ -116,9 +117,11 @@ def run_runtime_context_query(sql: str) -> str:
 
 @function_tool
 def execute_python(code: str) -> str:
-    """Pythonによる分析・可視化を実行し、標準出力と生成されたプロット画像のパスをJSONで返す。"""
-    import japanize_matplotlib
+    """Pythonによる分析・可視化を実行し、標準出力と生成されたプロット画像のパスをJSONで返す。
+    注意：内部で japanize_matplotlib がロードされているため、日本語は自動的にサポートされます。
+    グラフを作成する際は、必ず保存先として `static/plots/` ディレクトリを使用してください。"""
     plt.switch_backend("Agg")
+    plt.rcParams['font.family'] = 'IPAexGothic'  # 強制的に日本語フォントを設定
     loc = {"pd": pd, "plt": plt, "sns": sns, "db_path": str(DB_PATH), "duckdb": duckdb}
     output = io.StringIO()
     before_plots = set(_PLOT_DIR.glob("*.png"))
@@ -166,12 +169,25 @@ def google_web_search(query: str) -> str:
                         if chunk.web:
                             try:
                                 headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
-                                resolved = requests.head(chunk.web.uri, allow_redirects=True, timeout=5, headers=headers)
+                                # GETリクエストで少しだけ読み込み、タイトルを抽出する
+                                resolved = requests.get(chunk.web.uri, allow_redirects=True, timeout=5, headers=headers, stream=True)
                                 final_uri = resolved.url
+                                
+                                page_title = chunk.web.title or "Source"
+                                if resolved.status_code == 200:
+                                    # 最初の数KBだけ読んでタイトルタグを探す
+                                    content_chunk = next(resolved.iter_content(chunk_size=4096), b"").decode('utf-8', errors='ignore')
+                                    import re
+                                    title_match = re.search(r'<title[^>]*>(.*?)</title>', content_chunk, re.IGNORECASE | re.DOTALL)
+                                    if title_match:
+                                        fetched_title = title_match.group(1).strip()
+                                        if fetched_title:
+                                            page_title = fetched_title
+                                
                                 if final_uri not in seen_urls:
                                     sources.append({
                                         "url": final_uri,
-                                        "title": chunk.web.title or "Source"
+                                        "title": page_title
                                     })
                                     seen_urls.add(final_uri)
                             except Exception:

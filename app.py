@@ -82,8 +82,6 @@ if prompt:
     with st.chat_message("assistant"):
         status = st.status("エージェントが分析中...", expanded=True)
         result_placeholder = st.empty()
-        plots_container = st.container()
-        collected_plots: list[str] = []
 
         class DataEngineerHooks(AgentHooksBase):
             async def on_tool_start(self, context: Any, agent: Any, tool: Tool) -> None:
@@ -125,11 +123,9 @@ if prompt:
                         data = json.loads(result)
                         plots = data.get("plots", [])
                         for p in plots:
-                            if p not in collected_plots:
-                                collected_plots.append(p)
-                                with plots_container:
-                                    st.image(p, caption=os.path.basename(p))
-                                status.write(f"🖼️ **グラフ生成**: `{os.path.basename(p)}`")
+                            path = p.get("path")
+                            if path:
+                                status.write(f"🖼️ **グラフ生成**: `{os.path.basename(path)}`")
                     except Exception:
                         pass
 
@@ -167,22 +163,17 @@ if prompt:
             result = asyncio.run(run_agent())
             final_output_json = result.final_output or "{}"
             
-            # Remove markdown code block formatting if present (more robustly)
-            cleaned_json_string = final_output_json.strip()
-            if cleaned_json_string.startswith("```"):
-                # Find the first newline after ```
-                first_newline = cleaned_json_string.find('\n')
-                if first_newline != -1:
-                    cleaned_json_string = cleaned_json_string[first_newline+1:]
-                else:
-                    # Fallback if no newline (e.g. ```{...}```)
-                    cleaned_json_string = cleaned_json_string[cleaned_json_string.find('{'):]
-            if cleaned_json_string.endswith("```"):
-                cleaned_json_string = cleaned_json_string[:-3]
-            cleaned_json_string = cleaned_json_string.strip()
-            
             # 構造化されたJSON出力をパースして表示
             try:
+                # 正規表現を使って、出力からJSONオブジェクトの部分（{...}）だけを抽出する
+                import re
+                json_match = re.search(r'(\{.*\})', final_output_json, re.DOTALL)
+                
+                if json_match:
+                    cleaned_json_string = json_match.group(1)
+                else:
+                    cleaned_json_string = final_output_json # フォールバック
+                    
                 data = json.loads(cleaned_json_string)
                 report_content = data.get("report", "レポートの本文がありません。")
                 plots = data.get("plots", [])
@@ -194,7 +185,7 @@ if prompt:
                 # プロットの表示
                 for plot in plots:
                     if plot.get("path") and os.path.exists(plot["path"]):
-                        plots_container.image(plot["path"], caption=plot.get("title", ""))
+                        st.image(plot["path"], caption=plot.get("title", ""))
 
                 # 参照元の表示
                 if sources:
