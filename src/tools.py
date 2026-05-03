@@ -143,12 +143,27 @@ def google_web_search(query: str) -> str:
             config=types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())])
         )
         
-        # 安定したGoogle検索へのリンクを構築
+        # 参照サイト名の抽出（リンクは404になるため名前のみ）
+        source_names = []
+        try:
+            if hasattr(response, "candidates") and response.candidates:
+                metadata = response.candidates[0].grounding_metadata
+                if metadata and metadata.grounding_chunks:
+                    for chunk in metadata.grounding_chunks:
+                        if chunk.web and chunk.web.title:
+                            source_names.append(chunk.web.title)
+        except Exception:
+            pass
+
         import urllib.parse
         search_url = f"https://www.google.com/search?q={urllib.parse.quote(query)}"
         
         result_text = response.text
-        result_text += f"\n\n### 参照元（External Sources）\n- [Google 検索結果で詳細を確認する]({search_url})"
+        if source_names:
+            unique_sources = ", ".join(list(dict.fromkeys(source_names)))
+            result_text += f"\n\n### 参照情報（External Sources）\n- **主な情報源**: {unique_sources}"
+        
+        result_text += f"\n- [Google 検索で詳細を確認する]({search_url})"
             
         return result_text
     except Exception as e: return f"Search error: {str(e)}"
