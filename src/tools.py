@@ -130,6 +130,8 @@ def execute_python(code: str) -> str:
     except Exception as e:
         return json.dumps({"error": str(e), "stdout": output.getvalue()}, ensure_ascii=False)
 
+import requests
+
 @function_tool
 def google_web_search(query: str) -> str:
     """最新情報（法改正等）をGoogle検索で取得する。"""
@@ -143,27 +145,32 @@ def google_web_search(query: str) -> str:
             config=types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())])
         )
         
-        # 参照サイト名の抽出（リンクは404になるため名前のみ）
-        source_names = []
+        # 参照サイト情報と直リンクの抽出
+        source_info = []
         try:
             if hasattr(response, "candidates") and response.candidates:
                 metadata = response.candidates[0].grounding_metadata
                 if metadata and metadata.grounding_chunks:
                     for chunk in metadata.grounding_chunks:
-                        if chunk.web and chunk.web.title:
-                            source_names.append(chunk.web.title)
+                        if chunk.web:
+                            title = chunk.web.title or "Source"
+                            uri = chunk.web.uri
+                            # リダイレクトを解消して直リンクを取得
+                            try:
+                                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+                                resolved = requests.head(uri, allow_redirects=True, timeout=5, headers=headers)
+                                final_uri = resolved.url
+                            except Exception:
+                                final_uri = uri # 失敗時はそのまま
+                            source_info.append(f"- [{title}]({final_uri})")
         except Exception:
             pass
 
-        import urllib.parse
-        search_url = f"https://www.google.com/search?q={urllib.parse.quote(query)}"
-        
         result_text = response.text
-        if source_names:
-            unique_sources = ", ".join(list(dict.fromkeys(source_names)))
-            result_text += f"\n\n### 参照情報（External Sources）\n- **主な情報源**: {unique_sources}"
-        
-        result_text += f"\n- [Google 検索で詳細を確認する]({search_url})"
+        if source_info:
+            # 重複を排除して末尾に追加
+            unique_sources = "\n".join(list(dict.fromkeys(source_info)))
+            result_text += f"\n\n### 参照元（External Sources）\n{unique_sources}"
             
         return result_text
     except Exception as e: return f"Search error: {str(e)}"
