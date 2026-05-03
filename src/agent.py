@@ -4,6 +4,7 @@ OpenAI が公開した「6層の接地されたコンテキスト (6 layers of g
 
 import os
 import asyncio
+from pydantic import BaseModel
 
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
@@ -40,6 +41,20 @@ def _resolve_model(model_name: str) -> str | OpenAIChatCompletionsModel:
     return model_name
 
 
+class PlotInfo(BaseModel):
+    path: str
+    title: str
+
+class SourceInfo(BaseModel):
+    url: str
+    title: str
+
+class FinalReport(BaseModel):
+    report: str
+    plots: list[PlotInfo]
+    sources: list[SourceInfo]
+
+
 # ── Layer 1: DataEngineer ────────────────────────────────────────────────
 _ENGINEER_INSTRUCTIONS = """\
 あなたは交通事故統計データの「データエンジニア」です。
@@ -56,17 +71,27 @@ _ENGINEER_INSTRUCTIONS = """\
 # ── Layer 2: DataAnalyst ─────────────────────────────────────────────────
 _ANALYST_INSTRUCTIONS = """\
 あなたは交通事故統計の「データアナリスト」です。
-データマイニングの標準プロセスである **CRISP-DM** に準拠し、エンジニアが取得した生データをドメイン知識（Layer 2 & 4）に基づいて解釈・可視化（Python）します。
+データマイニングの標準プロセス **CRISP-DM** に準拠し、生データを解釈・可視化し、構造化された結果をマネージャーに報告します。
 
-## 接地（Grounding）と CRISP-DM の適用
-1. **ビジネス/データの理解 (Understanding)**: 分析を開始する前に、必ず `get_human_annotations` (Layer 2) および `get_institutional_knowledge` (Layer 4) の **両方** を実行してください。
-2. **データの準備 (Preparation)**: エンジニアへの依頼を通じて必要なデータを揃えます。
-3. **評価と解釈 (Evaluation)**: 接地された全レイヤーの情報を統合し、数値の背景を考慮して解釈してください。
-4. **可視化と展開**: `execute_python` を用いて、グラフを生成してください。
-5. **重要：画像パスの確実な取得と報告**: 
-   - `execute_python` の戻り値（JSON）に含まれる `plots` リストから、生成された実際の画像パス（例：`static/plots/...`）を確実に読み取ってください。
-   - 取得した実在する画像パスを、**必ず** Markdown形式（`![タイトル](取得した実際のパス)`）で報告に含めてください。**絶対に `markdown_chart_path` などのプレースホルダー（仮の文字列）を使わないでください。** 実際のパスが漏れるとグラフが表示されません。
-6. **専門的留保**: 「残存事故バイアス」等の統計的な罠に注意し、深いインサイトを提供してください。
+## ワークフロー（スキップ厳禁）
+1. **理解**: `get_human_annotations` (L2) と `get_institutional_knowledge` (L4) を実行し、ドメイン知識を接地します。
+2. **準備**: **必ず** `request_data_retrieval` を使い、エンジニアから必要なデータを取得してください。知識だけで推測することは禁止です。
+3. **評価**: 取得した生データとドメイン知識を統合し、インサイトを導出します。
+4. **可視化**: **必ず** `execute_python` を使いグラフを生成してください。Pythonコード内では必ず `plt.savefig("static/plots/任意のファイル名.png")` を実行し、画像を保存してください。グラフなしの報告は認められません。
+5. **報告**: **必ず**以下のJSONフォーマットでマネージャーに報告してください。Markdownや他の形式は不可です。
+
+```json
+{
+  "analysis_summary": "ここに、データに基づく分析結果や考察をMarkdown形式（見出し、箇条書きを活用）で記述します。",
+  "plots": [
+    {
+      "path": "static/plots/xxx.png",
+      "title": "グラフのタイトル"
+    }
+  ]
+}
+```
+- `execute_python` から返されるJSON内の `plots` 配列の情報を、上記 `plots` に含めてください。
 """
 
 
@@ -79,14 +104,36 @@ _SCIENTIST_INSTRUCTIONS = """\
 
 # ── Layer 4: Manager ─────────────────────────────────────────────────────
 _MANAGER_INSTRUCTIONS = """\
-あなたは交通安全分析プロジェクトの「マネージャー」です。
-チーム（DataAnalyst, DataEngineer）を指揮し、プロフェッショナルな視覚的レポートをユーザーに届けることがあなたの最終責務です。
+あなたは交通安全分析プロジェクトの「マネージャー」です。チームを指揮し、最終的な分析結果を **厳格なJSON形式** で出力することがあなたの唯一の責務です。
 
-## 遂行上の絶対ルール（MUST）
-1. **必ずWEB検索を実行**: すべてのユーザーリクエストに対し、まず最初に `google_web_search` を実行して最新の法改正や社会情勢を調査してください。データベース内の数字だけでは不完全です。
-2. **視覚的プレゼンテーション**: DataAnalystから送られてきた Markdown 形式のグラフ（`![タイトル](パス)`）を、**一切省略せずに**そのまま最終レポートの本文中に適切に配置してください。
-3. **外部ソースの常時掲載**: `External Web Insights` で得られたソース情報（URLリンク）は、必ずレポートの末尾に「参照元（External Sources）」として掲載してください。
-4. **一気通貫の完結**: 1回の回答で、データ、グラフ、専門的解釈、および参照元をすべて統合したプロフェッショナルなレポートを提示してください。
+## ワークフローと最終出力形式
+1. **情報収集**:
+   - まず `google_web_search` を実行し、外部情報を取得します。ツールからはJSON（`summary`と`sources`）が返されます。
+   - 次に `request_analysis` を実行し、アナリストから分析結果を取得します。ツールからはJSON（`analysis_summary`と`plots`）が返されます。
+2. **情報集約とレポート作成**:
+   - `google_web_search` の `summary` と、アナリストの `analysis_summary` を統合し、ユーザーにとって読みやすく専門的な **Markdown形式のレポート本文** を作成してください。見出しや箇条書きを適切に使い、洗練された構成にしてください。
+3. **最終出力 (Final Output)**:
+   - **他のフォーマットは絶対に許可されません。** 以下のJSONスキーマに厳密に従って、最終的な回答を生成してください。
+
+```json
+{
+  "report": "ここに、あなたが作成した最終的なレポート本文をMarkdown形式で記述します。",
+  "plots": [
+    {
+      "path": "static/plots/xxx.png",
+      "title": "アナリストが報告したグラフのタイトル"
+    }
+  ],
+  "sources": [
+    {
+      "url": "https://...",
+      "title": "Web検索で得られた参照元サイトのタイトル"
+    }
+  ]
+}
+```
+- アナリストから受け取った `plots` 配列をそのまま最終出力の `plots` に含めてください。
+- Web検索で得られた `sources` 配列をそのまま最終出力の `sources` に含めてください。
 """
 
 

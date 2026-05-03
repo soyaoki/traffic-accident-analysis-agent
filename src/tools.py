@@ -116,17 +116,28 @@ def run_runtime_context_query(sql: str) -> str:
 
 @function_tool
 def execute_python(code: str) -> str:
-    """Pythonによる分析・可視化を実行する。"""
-    import japanize_matplotlib  # noqa: F401
+    """Pythonによる分析・可視化を実行し、標準出力と生成されたプロット画像のパスをJSONで返す。"""
+    import japanize_matplotlib
     plt.switch_backend("Agg")
     loc = {"pd": pd, "plt": plt, "sns": sns, "db_path": str(DB_PATH), "duckdb": duckdb}
     output = io.StringIO()
     before_plots = set(_PLOT_DIR.glob("*.png"))
     try:
         with contextlib.redirect_stdout(output):
-            exec(code, globals(), loc)  # noqa: S102
-        new_plots = [str(p.relative_to(Path.cwd())) for p in set(_PLOT_DIR.glob("*.png")) - before_plots]
-        return json.dumps({"stdout": output.getvalue(), "message": "Success", "plots": new_plots}, ensure_ascii=False)
+            exec(code, globals(), loc)
+        
+        new_plots = []
+        after_plots = set(_PLOT_DIR.glob("*.png"))
+        for p in after_plots - before_plots:
+            new_plots.append({
+                "path": str(p.relative_to(Path.cwd())),
+                "title": os.path.basename(p) # デフォルトのタイトル
+            })
+            
+        return json.dumps({
+            "stdout": output.getvalue(),
+            "plots": new_plots
+        }, ensure_ascii=False)
     except Exception as e:
         return json.dumps({"error": str(e), "stdout": output.getvalue()}, ensure_ascii=False)
 
@@ -134,9 +145,9 @@ import requests
 
 @function_tool
 def google_web_search(query: str) -> str:
-    """最新情報（法改正等）をGoogle検索で取得する。"""
+    """最新情報（法改正等）をGoogle検索で取得し、情報と参照元URLリストをJSONで返す。"""
     api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key: return "Error: API key missing."
+    if not api_key: return json.dumps({"error": "API key missing."})
     client = genai.Client(api_key=api_key, http_options={'api_version': 'v1beta'})
     try:
         response = client.models.generate_content(
@@ -145,35 +156,35 @@ def google_web_search(query: str) -> str:
             config=types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())])
         )
         
-        # 参照サイト情報と直リンクの抽出
-        source_info = []
+        sources = []
         try:
             if hasattr(response, "candidates") and response.candidates:
                 metadata = response.candidates[0].grounding_metadata
                 if metadata and metadata.grounding_chunks:
+                    seen_urls = set()
                     for chunk in metadata.grounding_chunks:
                         if chunk.web:
-                            title = chunk.web.title or "Source"
-                            uri = chunk.web.uri
-                            # リダイレクトを解消して直リンクを取得
                             try:
                                 headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
-                                resolved = requests.head(uri, allow_redirects=True, timeout=5, headers=headers)
+                                resolved = requests.head(chunk.web.uri, allow_redirects=True, timeout=5, headers=headers)
                                 final_uri = resolved.url
+                                if final_uri not in seen_urls:
+                                    sources.append({
+                                        "url": final_uri,
+                                        "title": chunk.web.title or "Source"
+                                    })
+                                    seen_urls.add(final_uri)
                             except Exception:
-                                final_uri = uri # 失敗時はそのまま
-                            source_info.append(f"- [{title}]({final_uri})")
+                                continue # 解消できないURLはスキップ
         except Exception:
             pass
 
-        result_text = response.text
-        if source_info:
-            # 重複を排除して末尾に追加
-            unique_sources = "\n".join(list(dict.fromkeys(source_info)))
-            result_text += f"\n\n### 参照元（External Sources）\n{unique_sources}"
-            
-        return result_text
-    except Exception as e: return f"Search error: {str(e)}"
+        return json.dumps({
+            "summary": response.text,
+            "sources": sources
+        }, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
 
 # ── Role-based Tool Groups ────────────────────────────────────────────────
 

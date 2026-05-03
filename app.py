@@ -165,15 +165,55 @@ if prompt:
                 return await Runner.run(manager, history)
 
             result = asyncio.run(run_agent())
-            final_output = result.final_output or ""
+            final_output_json = result.final_output or "{}"
             
-            result_placeholder.markdown(final_output)
-            status.update(label="分析完了 ✅", state="complete", expanded=False)
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": final_output,
-                "plots": collected_plots,
-            })
+            # Remove markdown code block formatting if present (more robustly)
+            cleaned_json_string = final_output_json.strip()
+            if cleaned_json_string.startswith("```"):
+                # Find the first newline after ```
+                first_newline = cleaned_json_string.find('\n')
+                if first_newline != -1:
+                    cleaned_json_string = cleaned_json_string[first_newline+1:]
+                else:
+                    # Fallback if no newline (e.g. ```{...}```)
+                    cleaned_json_string = cleaned_json_string[cleaned_json_string.find('{'):]
+            if cleaned_json_string.endswith("```"):
+                cleaned_json_string = cleaned_json_string[:-3]
+            cleaned_json_string = cleaned_json_string.strip()
+            
+            # 構造化されたJSON出力をパースして表示
+            try:
+                data = json.loads(cleaned_json_string)
+                report_content = data.get("report", "レポートの本文がありません。")
+                plots = data.get("plots", [])
+                sources = data.get("sources", [])
+
+                # レポート本文の表示
+                result_placeholder.markdown(report_content)
+                
+                # プロットの表示
+                for plot in plots:
+                    if plot.get("path") and os.path.exists(plot["path"]):
+                        plots_container.image(plot["path"], caption=plot.get("title", ""))
+
+                # 参照元の表示
+                if sources:
+                    with st.expander("参照元"):
+                        for source in sources:
+                            st.markdown(f"- [{source.get('title', 'Source')}]({source.get('url', '#')})")
+
+                status.update(label="分析完了 ✅", state="complete", expanded=False)
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": report_content, # メッセージ履歴には本文のみ保存
+                    "plots": [p["path"] for p in plots if p.get("path")],
+                })
+
+            except json.JSONDecodeError:
+                # JSONパース失敗時は、生データを表示
+                result_placeholder.markdown("エラー: エージェントが不正なJSONを返しました。")
+                result_placeholder.code(final_output_json, language="json")
+                status.update(label="エラー", state="error")
 
         except Exception as e:
             status.update(label="エラー発生", state="error", expanded=True)
