@@ -33,9 +33,11 @@ def get_table_usage_metadata() -> str:
 
 @function_tool
 def get_human_annotations() -> str:
-    """[レイヤー #2：人間による注釈] ドメインの専門家によって提供される厳選された説明を取得する。
-    スキーマからは簡単に推測できない意図、セマンティクス、ビジネス上の意味、既知の注意事項を確認するために使用する。"""
-    return get_table_usage_metadata()
+    """[レイヤー #2：人間による注釈] 指標（致死率等）の計算定義、ビジネスルール、分析上の注意事項を取得する。
+    いかなる分析・計算を開始する前にも、必ず最初にこのツールを呼び出して定義を接地させること。"""
+    if not _CATALOG_PATH.exists():
+        return "Error: Catalog file not found."
+    return _CATALOG_PATH.read_text(encoding="utf-8")
 
 @function_tool
 def get_codex_enrichment() -> str:

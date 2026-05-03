@@ -105,7 +105,9 @@ if prompt:
         class DataAnalystHooks(AgentHooksBase):
             async def on_tool_start(self, context: Any, agent: Any, tool: Tool) -> None:
                 name = tool.name if hasattr(tool, "name") else str(tool)
-                if name == "request_data_retrieval":
+                if name == "get_human_annotations":
+                    status.write("📊 **DataAnalyst**: Layer 2 (Annotations) を接地中...")
+                elif name == "request_data_retrieval":
                     status.write("📊 **DataAnalyst**: エンジニアにデータ取得を依頼中...")
                 elif name == "execute_python":
                     status.write("📊 **DataAnalyst**: Pythonで可視化・分析を実行中...")
