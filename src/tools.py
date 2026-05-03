@@ -142,18 +142,27 @@ def google_web_search(query: str) -> str:
             contents=query,
             config=types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())])
         )
-        # ソース情報の抽出（metadataがあれば）
-        source_links = ""
+        
+        # ソース情報の抽出
+        source_links = []
         try:
             if hasattr(response, "candidates") and response.candidates:
-                grounding_metadata = response.candidates[0].grounding_metadata
-                if grounding_metadata and hasattr(grounding_metadata, "search_entry_point"):
-                    # シンプルに回答の末尾に情報を付与
-                    source_links = f"\n\nSources found via Google Search."
+                metadata = response.candidates[0].grounding_metadata
+                if metadata and metadata.grounding_chunks:
+                    for chunk in metadata.grounding_chunks:
+                        if chunk.web and chunk.web.uri:
+                            title = chunk.web.title or "Source"
+                            source_links.append(f"- [{title}]({chunk.web.uri})")
         except Exception:
             pass
+
+        result_text = response.text
+        if source_links:
+            # 重複を排除して末尾に追加
+            unique_links = "\n".join(list(dict.fromkeys(source_links)))
+            result_text += f"\n\n### 参照元（External Sources）\n{unique_links}"
             
-        return response.text + source_links
+        return result_text
     except Exception as e: return f"Search error: {str(e)}"
 
 # ── Role-based Tool Groups ────────────────────────────────────────────────
