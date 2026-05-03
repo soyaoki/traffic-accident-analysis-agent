@@ -132,7 +132,7 @@ def execute_python(code: str) -> str:
 
 @function_tool
 def google_web_search(query: str) -> str:
-    """最新情報（法改正等）の取得。ソースURLも含む。"""
+    """最新情報（法改正等）をGoogle検索で取得する。"""
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key: return "Error: API key missing."
     client = genai.Client(api_key=api_key, http_options={'api_version': 'v1beta'})
@@ -143,24 +143,12 @@ def google_web_search(query: str) -> str:
             config=types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())])
         )
         
-        # ソース情報の抽出
-        source_links = []
-        try:
-            if hasattr(response, "candidates") and response.candidates:
-                metadata = response.candidates[0].grounding_metadata
-                if metadata and metadata.grounding_chunks:
-                    for chunk in metadata.grounding_chunks:
-                        if chunk.web and chunk.web.uri:
-                            title = chunk.web.title or "Source"
-                            source_links.append(f"- [{title}]({chunk.web.uri})")
-        except Exception:
-            pass
-
+        # 安定したGoogle検索へのリンクを構築
+        import urllib.parse
+        search_url = f"https://www.google.com/search?q={urllib.parse.quote(query)}"
+        
         result_text = response.text
-        if source_links:
-            # 重複を排除して末尾に追加
-            unique_links = "\n".join(list(dict.fromkeys(source_links)))
-            result_text += f"\n\n### 参照元（External Sources）\n{unique_links}"
+        result_text += f"\n\n### 参照元（External Sources）\n- [Google 検索結果で詳細を確認する]({search_url})"
             
         return result_text
     except Exception as e: return f"Search error: {str(e)}"
