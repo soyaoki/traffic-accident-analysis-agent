@@ -61,8 +61,8 @@ if not st.session_state.messages and "pending_prompt" not in st.session_state:
     st.markdown("### 試してみる質問例")
     cols = st.columns(3)
     sample_queries = [
-        "2024年に自転車の事故件数や死亡率に変化はある？最新の法改正の影響も踏まえて分析して",
-        "2020年から2024年にかけて死亡事故が減っている要因は？社会情勢やニュースと関連づけて考察して",
+        "2020年比で2030年の「死亡事故ゼロ」は達成できそう？未達見込みならどの事故形態にどう手を打つべきか、データと最新の法改正を踏まえて戦略を練って",
+        "2024年の自転車事故や死亡率に変化はある？ヘルメット着用努力義務化などの影響も踏まえて分析して",
         "最近の電動キックボード（特定小型原動機付自転車）の事故傾向と、施行されたルールの関係を教えて",
     ]
     for i, query in enumerate(sample_queries):
@@ -85,40 +85,39 @@ if prompt:
         plots_container = st.container()
         collected_plots: list[str] = []
 
-        class DataAgentHooks(AgentHooksBase):
+        class DataEngineerHooks(AgentHooksBase):
             async def on_tool_start(self, context: Any, agent: Any, tool: Tool) -> None:
                 name = tool.name if hasattr(tool, "name") else str(tool)
                 if name == "get_table_usage_metadata":
-                    status.write("📖 **Layer 1: Usage (使用状況) を接地中...**")
+                    status.write("🛠️ **DataEngineer**: Layer 1 (Usage) を接地中...")
                 elif name == "get_codex_enrichment":
-                    status.write("📝 **Layer 3: Code-derived (前処理ロジック) を接地中...**")
+                    status.write("🛠️ **DataEngineer**: Layer 3 (Code) を接地中...")
                 elif name == "get_learned_memory":
-                    status.write("🧠 **Layer 5: Memory (過去の知見) を接地中...**")
-                elif name == "save_memory":
-                    status.write("💾 **Layer 5: 今回の知見を Memory に保存中...**")
+                    status.write("🛠️ **DataEngineer**: Layer 5 (Memory) を接地中...")
                 elif name == "run_runtime_context_query":
-                    sql = ""
-                    if isinstance(context, ToolContext):
-                        try:
-                            sql = json.loads(context.tool_arguments).get("sql", "")
-                        except Exception:
-                            pass
-                    if sql:
-                        status.write(f"🔍 **Layer 6: Runtime (ライブクエリ) 実行中:**\n```sql\n{sql}\n```")
-                    else:
-                        status.write("🔍 **Layer 6: Runtime 実行中...**")
-                elif name == "execute_python":
-                    status.write("📊 **分析実行中 (Python インタープリター)...**")
+                    status.write("🛠️ **DataEngineer**: Layer 6 (Runtime) クエリ実行中...")
 
             async def on_tool_end(self, context: Any, agent: Any, tool: Tool, result: str) -> None:
                 name = tool.name if hasattr(tool, "name") else str(tool)
                 if name == "run_runtime_context_query":
-                    try:
-                        rows = json.loads(result)
-                        count = len(rows) if isinstance(rows, list) else "?"
-                        status.write(f"✅ **クエリ完了** — {count} 件取得")
-                    except Exception:
-                        pass
+                    status.write("✅ **DataEngineer**: データの取得が完了しました。")
+
+        class DataAnalystHooks(AgentHooksBase):
+            async def on_tool_start(self, context: Any, agent: Any, tool: Tool) -> None:
+                name = tool.name if hasattr(tool, "name") else str(tool)
+                if name == "request_data_retrieval":
+                    status.write("📊 **DataAnalyst**: エンジニアにデータ取得を依頼中...")
+                elif name == "execute_python":
+                    status.write("📊 **DataAnalyst**: Pythonで可視化・分析を実行中...")
+                elif name == "get_institutional_knowledge":
+                    status.write("📊 **DataAnalyst**: Layer 4 (Institutional) を接地中...")
+
+            async def on_tool_end(self, context: Any, agent: Any, tool: Tool, result: str) -> None:
+                name = tool.name if hasattr(tool, "name") else str(tool)
+                if name == "request_data_retrieval":
+                    with status:
+                        with st.expander("取得データ（Raw）", expanded=False):
+                            st.code(result[:1000] + ("..." if len(result) > 1000 else ""), language="json")
                 elif name == "execute_python":
                     try:
                         data = json.loads(result)
@@ -132,52 +131,36 @@ if prompt:
                     except Exception:
                         pass
 
-        class AnalystAgentHooks(AgentHooksBase):
+        class ManagerHooks(AgentHooksBase):
             async def on_tool_start(self, context: Any, agent: Any, tool: Tool) -> None:
                 name = tool.name if hasattr(tool, "name") else str(tool)
-                if name == "query_data":
-                    status.write("🤖 **DataAgent への接地を依頼中...**")
+                if name == "request_analysis":
+                    status.write("🛡️ **Manager**: アナリストに分析を指示中...")
                 elif name == "google_web_search":
-                    query = ""
-                    if isinstance(context, ToolContext):
-                        try:
-                            query = json.loads(context.tool_arguments).get("query", "")
-                        except Exception:
-                            pass
-                    if query:
-                        status.write(f"🌐 **External Insights (最新情勢の調査) を実行中:**\n> {query}")
-                    else:
-                        status.write("🌐 **External Insights を実行中...**")
-                elif name == "get_institutional_knowledge":
-                    status.write("📖 **Layer 4: Institutional (専門知識) を接地中...**")
+                    status.write("🌐 **Manager**: 外部情報を調査中...")
 
             async def on_tool_end(self, context: Any, agent: Any, tool: Tool, result: str) -> None:
                 name = tool.name if hasattr(tool, "name") else str(tool)
-                if name == "google_web_search":
-                    status.write("✅ **Web Insights 完了**")
-                elif name == "query_data":
-                    import re
-                    plot_paths = re.findall(r"!\[.*?\]\((static/plots/.*?\.png)\)", result)
-                    for p in plot_paths:
-                        if p not in collected_plots:
-                            collected_plots.append(p)
-                            with plots_container:
-                                st.image(p, caption=os.path.basename(p))
-                            status.write(f"🖼️ **グラフ生成**: `{os.path.basename(p)}`")
+                if name == "request_analysis":
+                    status.write("✅ **Manager**: アナリストからの報告を受領しました。")
+                elif name == "google_web_search":
+                    with status:
+                        with st.expander("Web検索結果の要約", expanded=False):
+                            st.write(result)
 
         try:
             async def run_agent():
-                _, analyst = build_agents(
+                _, _, _, manager = build_agents(
                     model=model_option,
-                    data_hooks=DataAgentHooks(),
-                    analyst_hooks=AnalystAgentHooks(),
+                    engineer_hooks=DataEngineerHooks(),
+                    analyst_hooks=DataAnalystHooks(),
+                    manager_hooks=ManagerHooks(),
                 )
                 history = [
                     {"role": m["role"], "content": m["content"]}
                     for m in st.session_state.messages
                 ]
-                # 思考の深さに応じてターン数を調整 (SDKデフォルトに依存)
-                return await Runner.run(analyst, history)
+                return await Runner.run(manager, history)
 
             result = asyncio.run(run_agent())
             final_output = result.final_output or ""

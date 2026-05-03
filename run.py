@@ -24,8 +24,8 @@ from src.agent import build_agents
 
 
 async def run_query(query: str) -> str:
-    _data, analyst = build_agents()
-    result = await Runner.run(analyst, query)
+    _, _, _, manager = build_agents()
+    result = await Runner.run(manager, query)
     output = result.final_output or ""
     print(output)
     return output

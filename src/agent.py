@@ -11,7 +11,12 @@ from agents import Agent
 from agents.lifecycle import AgentHooksBase
 from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
 
-from src.tools import DATA_TOOLS, ANALYST_TOOLS
+from src.tools import (
+    ENGINEER_TOOLS,
+    ANALYST_TOOLS,
+    MANAGER_TOOLS,
+    SCIENTIST_TOOLS,
+)
 from src.preprocess import init_db, DB_PATH
 
 load_dotenv(override=True)
@@ -35,48 +40,58 @@ def _resolve_model(model_name: str) -> str | OpenAIChatCompletionsModel:
     return model_name
 
 
-# ── Layer 1: DataAgent ────────────────────────────────────────────────────
-_DATA_AGENT_INSTRUCTIONS = """\
-あなたは交通事故統計データベースの実行エンジンです。
-OpenAIの「6層の接地（Grounding）」の設計思想に基づき、正確かつ自律的にデータを処理します。
+# ── Layer 1: DataEngineer ────────────────────────────────────────────────
+_ENGINEER_INSTRUCTIONS = """\
+あなたは交通事故統計データの「データエンジニア」です。
+データの所在（Layer 1）、由来（Layer 3）、過去の知見（Layer 5）、および実行環境（Layer 6）に責任を持ちます。
 
 ## 接地（Grounding）された実行の指針
-1. **一括確認**: 最初に `Memory` (Layer 5) や `Usage` (Layer 1) を確認し、必要な情報を一度に取得してください。同じツールを何度も呼び出さないこと。
-2. **読解と実行の区別**: 
-   - 📝 `get_codex_enrichment`: データの「定義」や「由来」を確認するためにソースコードを読む。
-   - 📊 `execute_python`: 数値を「集計」したり「グラフ化」するためにコードを実行する（インタープリター）。
-3. **ループの回避**: `run_runtime_context_query` (Layer 6) でエラーが出た場合、修正は最大2回までとし、解決しない場合は理由を報告して中断してください。
+1. **正確な抽出**: データの型や結合条件を `Usage` (Layer 1) や `Code` (Layer 3) から確実に把握してSQLを構築してください。
+2. **自己修復**: SQLエラーが発生した場合は `Runtime` (Layer 6) の情報を元に自律的に修正してください。
+3. **知見の継承**: 有益なフィルタや制約を発見した場合は、必ず `save_memory` (Layer 5) を実行してください。
 
-## 鉄の掟
-- **記憶の保存**: 有用なフィルタや制約を発見した場合は、回答の最後に `save_memory` を実行してください。
-- **生データを返す**: 数値、グラフ、または「ソースコードから分かった定義」を客観的に報告してください。
+生データ（数値）と客観的な事実のみを上位エージェントに報告してください。
 """
 
-# ── Layer 2: AnalystAgent ─────────────────────────────────────────────────
+# ── Layer 2: DataAnalyst ─────────────────────────────────────────────────
 _ANALYST_INSTRUCTIONS = """\
-あなたは交通安全統計の専門家（アナリストエージェント）です。
-OpenAIの「6層の接地（Grounding）」を統合し、データに基づいた正確な洞察を提供します。
+あなたは交通事故統計の「データアナリスト」です。
+エンジニアが取得した生データを、ドメイン知識（Layer 2 & 4）に基づいて解釈し、可視化（Python）を行います。
 
-## 接地（Grounding）されたコンテキストの活用
-- **[Layer 2 & 4] 注釈と組織知**: カタログ定義や背景情報を参照し、数値の「意味」を把握する。
-- **[External] Web Insights**: 最新の外部要因（ニュース、法改正等）を補完する。
-- **[Layer 5] Memory**: DataAgentが過去に学んだ知見が回答に反映されているか確認する。
+## 分析と可視化の指針
+1. **統計的解釈**: `Institutional` (Layer 4) の知識に基づき、数値の背景（法改正、コロナ影響等）を考慮して解釈してください。
+2. **可視化**: 分析結果を直感的に理解できるよう、`execute_python` を用いて適切なグラフを生成してください。
+3. **専門的留保**: 「残存事故バイアス」等の統計的な罠に注意し、単なる数値の比較に留まらない洞察を提供してください。
+"""
 
-## ワークフローの最適化
-1. **情報収集**: DataAgentに必要な集計を依頼する。その際、DataAgentが自律的にコード（Layer 3）や記憶（Layer 5）を接地させることを信頼してください。
-2. **分析の完結**: DataAgentから返ってきた事実を元に、速やかに結論を導き出してください。不必要に DataAgent への委譲を繰り返さないこと。
-3. **統合回答**: すべての層の情報を統合し、ハルシネーションのない回答を作成してください。
+# ── Layer 3: DataScientist (Future Placeholder) ──────────────────────────
+_SCIENTIST_INSTRUCTIONS = """\
+あなたは交通事故統計の「データサイエンティスト」です。
+現在は準備段階ですが、将来的に予測モデリングや高度な統計検定を担当します。
+今回のタスクでは、必要に応じてアナリストをサポートしてください。
+"""
+
+# ── Layer 4: Manager ─────────────────────────────────────────────────────
+_MANAGER_INSTRUCTIONS = """\
+あなたは交通安全分析プロジェクトの「マネージャー」です。
+ユーザーの意図を汲み取り、アナリストとエンジニアを指揮して、最終的な報告書を完成させます。
+
+## 調整と統合の指針
+1. **意図の明確化**: ユーザーの質問が曖昧な場合、適切な分析方針を立ててチームに指示してください。
+2. **外部知識の統合**: `External Web Insights` を活用し、データベース外の最新ニュースや法改正情報を補完してください。
+3. **最終報告**: チームから上がってきた分析結果と外部情報を統合し、接地（Grounding）された正確で信頼性の高い回答を作成してください。
 """
 
 
 def build_agents(
     model: str | None = None,
-    data_hooks: AgentHooksBase | None = None,
+    engineer_hooks: AgentHooksBase | None = None,
     analyst_hooks: AgentHooksBase | None = None,
-) -> tuple[Agent, Agent]:
+    manager_hooks: AgentHooksBase | None = None,
+) -> tuple[Agent, Agent, Agent, Agent]:
     """
-    (data_agent, analyst_agent) を返す。
-    analyst_agent が data_agent を as_tool で呼び出すマルチエージェント構成。
+    (engineer, analyst, scientist, manager) を返す。
+    Manager -> Analyst -> Engineer の順で呼び出す階層構造。
     """
     if not DB_PATH.exists():
         init_db()
@@ -84,29 +99,51 @@ def build_agents(
     model_name = model or os.getenv("AGENT_MODEL", "gemini-2.5-flash")
     resolved = _resolve_model(model_name)
 
-    data_agent = Agent(
-        name="DataAgent",
-        instructions=_DATA_AGENT_INSTRUCTIONS,
-        tools=DATA_TOOLS,
+    # 1. DataEngineer
+    engineer = Agent(
+        name="DataEngineer",
+        instructions=_ENGINEER_INSTRUCTIONS,
+        tools=ENGINEER_TOOLS,
         model=resolved,
-        hooks=data_hooks,
+        hooks=engineer_hooks,
     )
 
-    analyst_agent = Agent(
-        name="AnalystAgent",
+    # 2. DataAnalyst
+    analyst = Agent(
+        name="DataAnalyst",
         instructions=_ANALYST_INSTRUCTIONS,
         tools=[
             *ANALYST_TOOLS,
-            data_agent.as_tool(
-                tool_name="query_data",
-                tool_description=(
-                    "交通事故統計データの取得・集計・可視化を実行する。"
-                    "OpenAI流の6層接地（コード読解、記憶、ランタイム検証等）を統合する。"
-                ),
+            engineer.as_tool(
+                tool_name="request_data_retrieval",
+                tool_description="データエンジニアにSQLによる生データの取得、スキーマ確認、メモリ操作を依頼する。",
             ),
         ],
         model=resolved,
         hooks=analyst_hooks,
     )
 
-    return data_agent, analyst_agent
+    # 3. DataScientist (Placeholder)
+    scientist = Agent(
+        name="DataScientist",
+        instructions=_SCIENTIST_INSTRUCTIONS,
+        tools=SCIENTIST_TOOLS,
+        model=resolved,
+    )
+
+    # 4. Manager
+    manager = Agent(
+        name="Manager",
+        instructions=_MANAGER_INSTRUCTIONS,
+        tools=[
+            *MANAGER_TOOLS,
+            analyst.as_tool(
+                tool_name="request_analysis",
+                tool_description="データアナリストに専門的な分析、解釈、および可視化（グラフ生成）を依頼する。",
+            ),
+        ],
+        model=resolved,
+        hooks=manager_hooks,
+    )
+
+    return engineer, analyst, scientist, manager

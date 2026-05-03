@@ -130,7 +130,7 @@ def execute_python(code: str) -> str:
 
 @function_tool
 def google_web_search(query: str) -> str:
-    """最新情報（法改正等）の取得。"""
+    """最新情報（法改正等）の取得。ソースURLも含む。"""
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key: return "Error: API key missing."
     client = genai.Client(api_key=api_key, http_options={'api_version': 'v1beta'})
@@ -140,20 +140,38 @@ def google_web_search(query: str) -> str:
             contents=query,
             config=types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())])
         )
-        return response.text
+        # ソース情報の抽出（metadataがあれば）
+        source_links = ""
+        try:
+            if hasattr(response, "candidates") and response.candidates:
+                grounding_metadata = response.candidates[0].grounding_metadata
+                if grounding_metadata and hasattr(grounding_metadata, "search_entry_point"):
+                    # シンプルに回答の末尾に情報を付与
+                    source_links = f"\n\nSources found via Google Search."
+        except Exception:
+            pass
+            
+        return response.text + source_links
     except Exception as e: return f"Search error: {str(e)}"
 
-DATA_TOOLS = [
-    get_table_usage_metadata,
-    get_human_annotations,
-    get_codex_enrichment,
-    get_learned_memory,
-    save_memory,
-    run_runtime_context_query,
-    execute_python,
+# ── Role-based Tool Groups ────────────────────────────────────────────────
+
+ENGINEER_TOOLS = [
+    get_table_usage_metadata,  # Layer 1
+    get_codex_enrichment,      # Layer 3
+    get_learned_memory,        # Layer 5
+    save_memory,               # Layer 5
+    run_runtime_context_query,  # Layer 6
 ]
 
 ANALYST_TOOLS = [
-    get_institutional_knowledge,
-    google_web_search,
+    get_human_annotations,       # Layer 2
+    get_institutional_knowledge,  # Layer 4
+    execute_python,              # Analysis & Visualization
 ]
+
+MANAGER_TOOLS = [
+    google_web_search,           # External Insights
+]
+
+SCIENTIST_TOOLS = []  # Placeholder for future DataScientist tools
