@@ -1,144 +1,95 @@
-# AI Data Analytics Agents — 交通事故統計分析
+# 🚗 Traffic Safety Analyst
 
-警察庁の交通事故統計オープンデータ（2020年・2024年、計60万件超）を  
-OAI Agents SDK のマルチエージェント構成で分析するデモプロジェクトです。
+**接地（Grounding）されたコンテキストに基づく、交通事故統計の自己学習型データエージェント。**
 
-## アーキテクチャ
+警察庁の交通事故統計オープンデータ（2020年・2024年、計60万件超）を対象に、OpenAIが提唱する「6層の接地されたコンテキスト（6 layers of grounded context）」の思想を実装したPoCプロジェクトです。
 
-```mermaid
-graph TD
-    User["👤 ユーザー（自然言語）"]
-    UI["🌐 Streamlit UI / CLI (run.py)"]
+## Why This Project?
 
-    subgraph OAI_Agents["OAI Agents SDK"]
-        Analyst["🧠 AnalystAgent\n(Layer 2: 解釈・統合層)\n- 残存事故バイアス等の留保\n- Web検索による背景補完"]
-        Data["⚙️ DataAgent\n(Layer 1: 実行層)\n- SQL / Python ツール保持\n- 生データのみ返す"]
-    end
+LLMが直接SQLを書いてデータを分析する際、多くの壁にぶつかります。スキーマの意図が不明、ドメイン固有の定義（「致死率」と「死亡率」の違い等）の欠如、統計的なバイアスの無視、そして同じ間違いを繰り返すこと。
 
-    subgraph Tools["Tools"]
-        Catalog["📖 get_semantic_catalog\nカタログ参照"]
-        SQL["🔍 run_traffic_query\nDuckDB SQL実行"]
-        Python["🐍 execute_python\nCode Interpreter"]
-        Web["🌐 google_web_search\nGemini Native Search"]
-    end
+本プロジェクトは、**6層の接地（Grounding）**、**自己学習ループ**、および**マルチエージェント構成**を用いることで、単なる数値の抽出を超えた、意味のあるインサイトの提供を目指します。
 
-    subgraph Storage["Storage"]
-        DuckDB[("🦆 DuckDB\naccidents テーブル\n2020+2024 合計60万件")]
-        Plots["🖼️ static/plots/\n生成グラフ"]
-    end
+---
 
-    User --> UI
-    UI --> Analyst
-    Analyst -- "as_tool: query_data" --> Data
-    Analyst --> Web
-    Data --> Catalog
-    Data --> SQL
-    Data --> Python
-    SQL --> DuckDB
-    Python --> DuckDB
-    Python --> Plots
-    Catalog -. "catalog.yaml" .-> Analyst
-```
+## アーキテクチャ：6層の接地（Grounding）
 
-## アーキテクチャ：OpenAI流「6層の接地」をシンプルに再現
+本エージェントは、以下の6つのコンテキスト層を接地させることで、ハルシネーションを抑制し、統計的に正しい回答を導き出します。
 
-本プロジェクトは、OpenAI がブログ「Inside our in-house data agent」で提唱した **「6層の接地されたコンテキスト（6 layers of grounded context）」** という思想を、ローカル環境でシンプルに体験するための PoC です。
+| 層 | 接地の目的 | 本プロジェクトでの実装 |
+|:---|:---|:---|
+| **1. Usage** | テーブルの使用状況・結合ルールの理解 | `catalog.yaml` の典型的なクエリパターン |
+| **2. Annotations** | メトリクスの定義、ビジネス上の意味 | セマンティック・カタログ（致死率の計算式等） |
+| **3. Code-derived** | データの由来、前処理ロジックの把握 | `preprocess.py` ソースコードの直接読解 |
+| **4. Institutional** | 背景知識、ドメインの専門知 | `domain.yaml` / `background.yaml`（バイアス、法改正） |
+| **5. Memory** | 過去の修正、成功パターンの再利用 | `save_memory` による DuckDB への知見蓄積 |
+| **6. Runtime** | ライブデータの検証、エラー修復 | `run_runtime_context_query` によるスキーマ検証 |
 
-大規模な組織知や複雑なパイプラインを、YAMLファイルやソースコードの直接読解という形に置き換えて実装しています。
+加えて、最新の法改正ニュース等を取得するために **Web Search** を統合しており、これらを補完する外部知識（External Insights）として活用しています。
 
-| 層 | 本プロジェクトでの簡略実装 | 狙い |
-|---|---|---|
-| 1. **使用状況** | `catalog.yaml` のクエリ例 | 過去の成功パターンから結合ルールを学ぶ。 |
-| 2. **注釈** | セマンティック・カタログ | スキーマにはないビジネス的な意味を定義。 |
-| 3. **コード由来** | `preprocess.py` の直接読解 | ロジックからデータの由来や除外条件を理解。 |
-| 4. **組織知** | 背景知識・ドメイン知識ファイル | 数値の変化を社会情勢や専門知と紐付ける。 |
-| 5. **メモリ** | DuckDB 内の過去ログ保存 | わかりにくいフィルタや修正内容を次回に活かす。 |
-| 6. **ランタイム** | ライブクエリとエラー修正 | 生データを確認し、失敗しても自力でリトライする。 |
+---
 
-加えて、最新の法改正ニュース等を取得するために **Gemini Native Search** を統合しており、6層のコンテキストを補完する**外部知識（External Insights）**として活用しています。
+## エージェント構成
 
-AnalystAgent は DataAgent を `as_tool` で呼び出す。LLM同士が連携するマルチエージェント構成により、実行ロジックとドメイン知識を分離している。
+OpenAI Agents SDK を用い、役割の異なる2つのエージェントが連携します。
 
-## セットアップ
+1.  **AnalystAgent (Layer 2 & 4)**:
+    *   交通安全統計の専門家。
+    *   ドメイン知識（Layer 4）に基づき数値を解釈し、「残存事故バイアス」等の統計的留保を付けて回答します。
+2.  **DataAgent (Layer 1, 3, 5, 6)**:
+    *   データ実行エンジン。
+    *   SQL実行、Pythonによる可視化、コード読解、メモリの読み書きを担当します。生データと客観的な事実のみを Analyst に返します。
+
+---
+
+## 技術スタック
+
+- **OpenAI Agents SDK** — マルチエージェント・オーケストレーション
+- **DuckDB** — ローカル分析用高速インメモリDB
+- **Streamlit** — インタラクティブなユーザーインターフェース
+
+---
+
+## クイックスタート
+
+### 1. セットアップ
 
 ```bash
-# 1. リポジトリをクローン
-git clone <repo>
-cd ai-data-analytics-agents
-
-# 2. 依存関係のインストール
+# 依存関係のインストール
 uv sync
 
-# 3. 環境変数の設定
+# 環境変数の設定
 cp .env.example .env
-# .env を編集して APIキーを設定
+# .env を編集して GEMINI_API_KEY を設定
 ```
 
-### 必要な環境変数（`.env`）
-
-```
-GEMINI_API_KEY=AIza...          # Gemini を使う場合（デフォルト）
-OPENAI_API_KEY=sk-...           # GPT-4o を使う場合（省略可）
-AGENT_MODEL=gemini-2.5-flash    # 使用するモデル（デフォルト）
-```
-
-### データの配置
-
-`data/` ディレクトリに警察庁オープンデータの CSV を配置してください。
-
+### 2. データの配置
+`data/` ディレクトリに警察庁の CSV を配置してください（初回起動時に DuckDB へ自動変換されます）。
 ```
 data/
-  honhyo_2020.csv   # 2020年 交通事故本票
-  honhyo_2024.csv   # 2024年 交通事故本票
+  honhyo_2020.csv
+  honhyo_2024.csv
 ```
 
-データは [警察庁オープンデータ](https://www.npa.go.jp/publications/statistics/koutsuu/opendata/index_opendata.html) から取得できます。  
-初回起動時に DuckDB（`data/traffic_safety.db`）へ自動変換されます。
+### 3. 実行
 
-## 実行方法
-
-### Streamlit UI（推奨）
-
+**Streamlit UI (推奨):**
 ```bash
 uv run streamlit run app.py
 ```
 
-分析中の進捗（カタログ参照 → SQL実行 → Python実行 → グラフ生成）がリアルタイムに表示されます。
-
-### CLI
-
+**CLI デモ:**
 ```bash
-uv run python run.py
-# カスタムクエリ
-uv run python run.py --query "サポカーと非サポカーの致死率を比較して"
+uv run python run.py --query "2020年と2024年の死亡事故件数の変化を教えて"
 ```
 
 ## 質問例
 
-- `2020年と2024年の死亡事故件数の変化を教えてください`
 - `サポカーと非サポカーの致死率を比較して、残存事故バイアスの観点から解釈してください`
-- `事故類型別（人対車両・車両相互・車両単独）の死亡事故件数を比較してグラフにして`
+- `電動キックボード（特定小型原動機付自転車）の事故傾向と、施行されたルールの関係を教えて`
 - `このままのペースで2030年の政府目標（死者数1500人以下）は達成できるか試算して`
 
-## プロジェクト構成
+---
 
-```
-.
-├── app.py                  # Streamlit UI
-├── run.py                  # CLI デモ
-├── src/
-│   ├── agent.py            # マルチエージェント構成（build_agents）
-│   ├── tools.py            # function_tool 定義（SQL・Python・カタログ）
-│   ├── preprocess.py       # CSV → DuckDB 変換
-│   └── context/
-│       └── catalog.yaml    # Layer 2 セマンティックカタログ
-└── static/plots/           # 生成グラフの保存先
-```
-
-## 技術スタック
-
-- **OAI Agents SDK** (`openai-agents==0.15.1`) — マルチエージェントオーケストレーション
-- **DuckDB** — ローカル分析用インメモリDB
-- **Gemini 2.5 Flash** — OpenAI互換エンドポイント経由
-- **Streamlit** — UI
-- **japanize-matplotlib** — 日本語ラベル付きグラフ生成
+## Learn More
+- [OpenAI's In-House Data Agent](https://openai.com/index/inside-our-in-house-data-agent/) — コンテキスト接地の着想元

@@ -89,13 +89,13 @@ if prompt:
             async def on_tool_start(self, context: Any, agent: Any, tool: Tool) -> None:
                 name = tool.name if hasattr(tool, "name") else str(tool)
                 if name == "get_table_usage_metadata":
-                    status.write("📖 **Layer 1: 使用状況 (Metadata) を確認中...**")
+                    status.write("📖 **Layer 1: Usage (使用状況) を接地中...**")
                 elif name == "get_codex_enrichment":
-                    status.write("📝 **Layer 3: コード由来 (前処理ロジック) を読解中...**")
+                    status.write("📝 **Layer 3: Code-derived (前処理ロジック) を接地中...**")
                 elif name == "get_learned_memory":
-                    status.write("🧠 **Layer 5: メモリ (過去の知見) を検索中...**")
+                    status.write("🧠 **Layer 5: Memory (過去の知見) を接地中...**")
                 elif name == "save_memory":
-                    status.write("💾 **Layer 5: 今回の知見をメモリに保存中...**")
+                    status.write("💾 **Layer 5: 今回の知見を Memory に保存中...**")
                 elif name == "run_runtime_context_query":
                     sql = ""
                     if isinstance(context, ToolContext):
@@ -104,9 +104,9 @@ if prompt:
                         except Exception:
                             pass
                     if sql:
-                        status.write(f"🔍 **Layer 6: ランタイム (ライブクエリ) 実行中:**\n```sql\n{sql}\n```")
+                        status.write(f"🔍 **Layer 6: Runtime (ライブクエリ) 実行中:**\n```sql\n{sql}\n```")
                     else:
-                        status.write("🔍 **Layer 6: ランタイム 実行中...**")
+                        status.write("🔍 **Layer 6: Runtime 実行中...**")
                 elif name == "execute_python":
                     status.write("📊 **分析実行中 (Python インタープリター)...**")
 
@@ -136,7 +136,7 @@ if prompt:
             async def on_tool_start(self, context: Any, agent: Any, tool: Tool) -> None:
                 name = tool.name if hasattr(tool, "name") else str(tool)
                 if name == "query_data":
-                    status.write("🤖 **データ集計を依頼中...**")
+                    status.write("🤖 **DataAgent への接地を依頼中...**")
                 elif name == "google_web_search":
                     query = ""
                     if isinstance(context, ToolContext):
@@ -145,11 +145,11 @@ if prompt:
                         except Exception:
                             pass
                     if query:
-                        status.write(f"🌐 **Web Insights (最新情勢の調査) を実行中:**\n> {query}")
+                        status.write(f"🌐 **External Insights (最新情勢の調査) を実行中:**\n> {query}")
                     else:
-                        status.write("🌐 **Web Insights を実行中...**")
+                        status.write("🌐 **External Insights を実行中...**")
                 elif name == "get_institutional_knowledge":
-                    status.write("📖 **Layer 4: 組織知 (専門知識) を確認中...**")
+                    status.write("📖 **Layer 4: Institutional (専門知識) を接地中...**")
 
             async def on_tool_end(self, context: Any, agent: Any, tool: Tool, result: str) -> None:
                 name = tool.name if hasattr(tool, "name") else str(tool)
