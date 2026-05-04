@@ -1,4 +1,4 @@
-# 🚗 Traffic Safety Analyst
+# 🚗 Traffic Accident Analysis Agent
 
 **接地（Grounding）されたコンテキストに基づく、交通事故統計の自己学習型データエージェント。**
 

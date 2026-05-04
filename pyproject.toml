@@ -1,5 +1,5 @@
 [project]
-name = "ai-data-analytics-agents"
+name = "traffic-accident-analysis-agent"
 version = "0.1.0"
 description = "Add your description here"
 requires-python = ">=3.13"
