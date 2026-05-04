@@ -26,11 +26,9 @@ st.set_page_config(
 )
 
 st.sidebar.title("分析設定")
-model_option = st.sidebar.selectbox(
-    "モデル選択",
-    ["gemini-2.5-flash", "gemini-1.5-flash", "gpt-4o-mini", "gpt-4o"],
-    index=0,
-)
+# .env から現在のモデル名を取得して表示（選択不可にする）
+current_model = os.getenv("AGENT_MODEL", "gemini-2.5-flash")
+st.sidebar.info(f"使用中のモデル: **{current_model}**")
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("""
@@ -149,7 +147,7 @@ if prompt:
         try:
             async def run_agent():
                 _, _, _, manager = build_agents(
-                    model=model_option,
+                    model=current_model,
                     engineer_hooks=DataEngineerHooks(),
                     analyst_hooks=DataAnalystHooks(),
                     manager_hooks=ManagerHooks(),

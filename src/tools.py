@@ -152,9 +152,15 @@ def google_web_search(query: str) -> str:
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key: return json.dumps({"error": "API key missing."})
     client = genai.Client(api_key=api_key, http_options={'api_version': 'v1beta'})
+    # AGENT_MODEL が OpenAI モデルの場合でも、検索は Gemini を使用するように SEARCH_MODEL を参照する
+    search_model = os.getenv("SEARCH_MODEL", os.getenv("AGENT_MODEL", "gemini-2.5-flash"))
+    # もし search_model が gemini で始まらない（OpenAIのモデル）場合は、強制的に gemini-2.5-flash を使う
+    if not any(search_model.startswith(p) for p in ["gemini-", "google/gemini-"]):
+        search_model = "gemini-2.5-flash"
+
     try:
         response = client.models.generate_content(
-            model=os.getenv("AGENT_MODEL", "gemini-2.5-flash"),
+            model=search_model,
             contents=query,
             config=types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())])
         )

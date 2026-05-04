@@ -120,7 +120,10 @@ uv sync
 
 # 環境変数の設定
 cp .env.example .env
-# .env を編集して GEMINI_API_KEY を設定
+# .env を編集して API キーを設定
+# 使用可能なモデル名は以下を参照：
+# Gemini: https://ai.google.dev/gemini-api/docs/models?hl=ja
+# OpenAI: https://platform.openai.com/docs/models
 ```
 
 ### 2. データの配置
